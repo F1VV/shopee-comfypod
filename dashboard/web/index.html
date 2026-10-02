@@ -21,10 +21,11 @@
     <button role="tab" data-tab="overview" aria-selected="true">Overview <kbd>1</kbd></button>
     <button role="tab" data-tab="create">Create <kbd>2</kbd></button>
     <button role="tab" data-tab="shopee">Shopee <kbd>3</kbd></button>
-    <button role="tab" data-tab="models">Models <kbd>4</kbd></button>
-    <button role="tab" data-tab="outputs">Outputs <kbd>5</kbd></button>
-    <button role="tab" data-tab="keys">Keys <kbd>6</kbd></button>
-    <button role="tab" data-tab="logs">Logs <kbd>7</kbd></button>
+    <button role="tab" data-tab="story">Story <kbd>4</kbd></button>
+    <button role="tab" data-tab="models">Models <kbd>5</kbd></button>
+    <button role="tab" data-tab="outputs">Outputs <kbd>6</kbd></button>
+    <button role="tab" data-tab="keys">Keys <kbd>7</kbd></button>
+    <button role="tab" data-tab="logs">Logs <kbd>8</kbd></button>
   </nav>
   <a class="btn brand open-comfy" id="openComfyTop" target="_blank" rel="noopener">Open ComfyUI <span aria-hidden="true">↗</span></a>
 </header>
@@ -565,6 +566,203 @@
     </div>
   </section>
 
+  <!-- STORY (added for this workspace; story.js) -->
+  <section class="tab" id="tab-story" hidden>
+    <div class="section-title">
+      <h1>Story</h1>
+      <p class="sub">Tell a story scene by scene: who is in it, where and when, then each shot's
+        camera, action and dialogue. A grey blocking render from Blender can set the camera and the
+        movement.</p>
+    </div>
+
+    <div class="grid two wide-left">
+      <div class="stack">
+      <div class="card" id="stCard">
+        <div class="mode-row">
+          <div class="opt">
+            <span class="opt-k">Shape</span>
+            <div class="seg aspect" id="stAspect">
+              <button data-aspect="16:9" aria-pressed="true"><i class="ar r169"></i>16:9</button>
+              <button data-aspect="9:16"><i class="ar r916"></i>9:16</button>
+              <button data-aspect="1:1"><i class="ar r11"></i>1:1</button>
+            </div>
+          </div>
+          <div class="opt">
+            <span class="opt-k">Takes</span>
+            <div class="seg" id="stTakes">
+              <button data-takes="1" aria-pressed="true">×1</button>
+              <button data-takes="2">×2</button>
+              <button data-takes="3">×3</button>
+              <button data-takes="4">×4</button>
+            </div>
+            <em class="hint">each take is a new seed</em>
+          </div>
+          <span class="spacer"></span>
+          <button class="link" id="stNew" type="button">New story</button>
+        </div>
+
+        <section class="step">
+          <h3><b class="n">1</b> The story</h3>
+          <div class="sp-fields">
+            <label class="field"><span>Title</span>
+              <input id="stTitle" spellcheck="false" placeholder="Rain on Soi 11"></label>
+            <label class="field"><span>Where <i>English</i></span>
+              <input id="stWhere" spellcheck="false" placeholder="a narrow Bangkok alley with neon signs"></label>
+          </div>
+          <label class="field st-wide"><span>What it is about <i>English, one or two sentences</i></span>
+            <textarea id="stLogline" rows="2" spellcheck="false"
+              placeholder="A shy student finds the street-food boy she has a crush on hiding from the rain, and finally speaks to him."></textarea></label>
+          <label class="field st-wide"><span>When <i>time of day, era, weather</i></span>
+            <input id="stWhen" spellcheck="false" placeholder="a rainy night in the 2000s"></label>
+          <div class="row tight st-chips" id="stWhenChips">
+            <button class="st-chip" type="button">dawn</button>
+            <button class="st-chip" type="button">midday</button>
+            <button class="st-chip" type="button">golden hour</button>
+            <button class="st-chip" type="button">blue hour</button>
+            <button class="st-chip" type="button">night</button>
+            <button class="st-chip" type="button">heavy rain</button>
+            <button class="st-chip" type="button">foggy morning</button>
+            <button class="st-chip" type="button">the 1990s</button>
+          </div>
+        </section>
+
+        <section class="step">
+          <h3><b class="n">2</b> Who is in it</h3>
+          <p class="small dim">A photo keeps the same face in every scene. Write <span class="mono">@Name</span>
+            in a shot to point at someone.</p>
+          <div class="sp-lib" id="stSaved"></div>
+          <div id="stCast"></div>
+          <div class="row tight">
+            <button class="link" id="stAddCast" type="button">+ Add a character</button>
+          </div>
+          <div class="st-place">
+            <span id="stPlacePic"></span>
+            <div class="st-place-body">
+              <b class="small">The place <i class="dim">optional</i></b>
+              <p class="small dim">A photo of the location keeps it the same in every scene.</p>
+              <input id="stPlaceWhat" spellcheck="false" placeholder="what the place is, e.g. a street-food stall under a tin roof" hidden>
+              <button class="link" id="stPlaceBtn" type="button">+ Photo of the place</button>
+              <input id="stPlaceFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+            </div>
+          </div>
+        </section>
+
+        <section class="step">
+          <h3><b class="n">3</b> Look and sound</h3>
+          <div class="mode-row">
+            <div class="opt">
+              <span class="opt-k">Look</span>
+              <div class="seg" id="stLook">
+                <button data-look="film" aria-pressed="true">Cinematic film</button>
+                <button data-look="drama">TV drama</button>
+                <button data-look="vlog">Phone vlog</button>
+                <button data-look="cg">3D animated</button>
+                <button data-look="anime">Anime</button>
+              </div>
+            </div>
+          </div>
+          <label class="field st-wide"><span>Look in your words <i>optional, replaces the choice above</i></span>
+            <input id="stLookText" spellcheck="false"></label>
+          <label class="field st-wide"><span>Music and sound <i>for every scene</i></span>
+            <input id="stMusic" spellcheck="false" placeholder="Ambient sound that matches the setting"></label>
+        </section>
+
+        <div class="st-scenes-bar">
+          <div class="seg st-scenes" id="stScenes"></div>
+          <span class="row tight st-scene-links">
+            <button class="link" id="stAddScene" type="button">+ Scene</button>
+            <button class="link" id="stDupScene" type="button">Duplicate</button>
+            <button class="link" id="stDelScene" type="button">Delete</button>
+          </span>
+        </div>
+
+        <section class="step st-scene">
+          <h3><b class="n">4</b> Scene <span id="stSceneNo">1</span></h3>
+          <div class="sp-fields">
+            <label class="field"><span>Scene title</span>
+              <input id="stSceneTitle" spellcheck="false"></label>
+            <label class="field"><span>Where <i>if it differs</i></span>
+              <input id="stSceneWhere" spellcheck="false"></label>
+            <label class="field"><span>When <i>if it differs</i></span>
+              <input id="stSceneWhen" spellcheck="false"></label>
+            <label class="field"><span>Sound <i>if it differs</i></span>
+              <input id="stSceneSound" spellcheck="false"></label>
+          </div>
+
+          <div class="st-blocking">
+            <div class="st-blocking-head">
+              <b>Blocking video from Blender</b> <i class="small dim">optional · goes to H3 as &lt;Video 1&gt;</i>
+              <span class="spacer"></span>
+              <button class="link" id="stBlockingBtn" type="button">+ Add blocking video</button>
+              <button class="link" id="stBlockingFit" type="button" hidden>Fit shots to the video</button>
+              <button class="link" id="stBlockingRemove" type="button" hidden>Remove</button>
+              <input id="stBlockingFile" type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.mov,.webm,.mkv" hidden>
+            </div>
+            <div id="stBlocking"></div>
+            <div class="opt" id="stFollowRow" hidden>
+              <span class="opt-k">H3 follows</span>
+              <div class="seg" id="stFollow">
+                <button data-follow="camera">Camera only</button>
+                <button data-follow="full" aria-pressed="true">Camera + blocking</button>
+                <button data-follow="timing">Loose timing</button>
+              </div>
+              <p class="small dim" id="stFollowNote"></p>
+            </div>
+            <details class="st-blender" id="stBlenderShow">
+              <summary class="small">How to render it in Blender</summary>
+              <ol class="small dim">
+                <li>Block the scene with simple shapes or mannequins and animate the camera. Give each
+                  character its own colour, so H3 can tell them apart.</li>
+                <li>Render at 24 fps, the scene's shape and length. The script below sets that up
+                  (Workbench, H.264 MP4).</li>
+                <li>Add the MP4 here (or drop it on this form) and pick what H3 should follow.</li>
+              </ol>
+              <pre class="mono small st-code" id="stBlenderCode"></pre>
+              <button class="link" id="stBlenderCopy" type="button">Copy the script</button>
+            </details>
+          </div>
+
+          <h3 class="st-shots-title">Shots <i>English for what happens; dialogue in Thai or English</i></h3>
+          <div id="stShots"></div>
+          <div class="row tight">
+            <button class="link" id="stAddShot" type="button">+ Add a shot</button>
+          </div>
+        </section>
+
+        <div class="render">
+          <div class="render-row">
+            <div class="opt toggles">
+              <label class="toggle" title="Renders at 1280×704 (or 704×1280) from the start. About 1.8x the time.">
+                <input type="checkbox" id="stHd"> <span>720p</span>
+              </label>
+              <label class="toggle fast" id="stFastRow" title="4 steps instead of 8: about 1.5x faster.">
+                <input type="checkbox" id="stFast"> <span>Fast</span> <em>quality drops slightly</em>
+              </label>
+            </div>
+          </div>
+          <div class="render-row go">
+            <p class="small dim clip-len">Scene length <b class="mono" id="stLength">6s</b>
+              <span class="warn-note" id="stLengthNote"></span></p>
+            <span class="spacer"></span>
+            <button class="btn ghost" id="stAll" type="button" hidden>Make all scenes</button>
+            <button class="btn brand big" id="stStart">Make this scene</button>
+          </div>
+        </div>
+        <p class="small dim" id="stMsg"></p>
+      </div>
+      </div>
+
+      <div class="stack">
+        <div id="stQueueSlot"></div>
+        <div class="card">
+          <div class="card-head"><h2>Prompt <span class="hint" id="stRefsNote"></span></h2>
+            <button class="link" id="stCopyPrompt" type="button">Copy</button></div>
+          <pre class="mono small dim sp-preview" id="stPreview"></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- MODELS -->
   <section class="tab" id="tab-models" hidden>
     <div class="section-title">
@@ -706,6 +904,7 @@
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="app.js"></script>
 <script src="shopee.js"></script>
+<script src="story.js"></script>
 <script src="doodle.js"></script>
 <script src="i18n.js"></script>
 </body>

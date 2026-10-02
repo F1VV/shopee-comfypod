@@ -1,9 +1,16 @@
 # Shopee ComfyPod: RunPod template
 
-**Shopee ComfyPod** is the [AI Angel ComfyPod](https://www.thepexcel.com/aiangel-comfypod/) image with the
-dashboard's **Shopee** tab added. The tab has the product, presenter, Thai script, batch and
-doodle pop-up features. Everything else is the original image (`BASE_IMAGE`, pinned to
-`d0aaacd`), unchanged.
+**Shopee ComfyPod** is the [AI Angel ComfyPod](https://www.thepexcel.com/aiangel-comfypod/) image with two
+dashboard tabs added:
+
+- **Shopee**: product, presenter, Thai script, batch and doodle pop-ups for affiliate clips.
+- **Story**: a story told scene by scene. Characters (a photo keeps a face the same in every
+  scene), where and when, then each shot's camera, action and dialogue. A scene can take a grey
+  **blocking render from Blender**, which H3 gets as `<Video 1>` and follows for the camera
+  movement, framing and cuts, and optionally where the characters stand and move.
+
+Everything else is the original image (`BASE_IMAGE`, pinned to `d0aaacd`), except two backend
+files the Story tab needs (see below).
 
 - **The website** is in the image, so it is there as soon as the pod starts (port 8189).
 - **The models** download when the pod starts, from the presets in `MODELS`, onto the volume.
@@ -11,14 +18,29 @@ doodle pop-up features. Everything else is the original image (`BASE_IMAGE`, pin
 
 ## How the image is built
 
-Every push to `main` runs `.github/workflows/build-image.yml`. It appends `dashboard/web/` as
-one small layer on top of the base image and pushes
-`ghcr.io/<your-github-user>/<this-repo>:latest`. The base is not downloaded, so a build takes
-about a minute. Watch it under **Actions**.
+Every push to `main` runs `.github/workflows/build-image.yml`. It appends `dashboard/web/` and
+`backend/opt/` as one small layer on top of the base image and pushes
+`ghcr.io/<your-github-user>/<this-repo>:latest`. The base is not unpacked, so a build takes a
+few minutes. Watch it under **Actions**.
 
-To change the website: edit the files (or copy them over from
-`../aiangel-pod/dashboard/web/` with `update-web.sh`), then commit and push. A pod picks up the
-new image the next time it is created or restarted.
+To change the website: edit the files, then commit and push. `update-web.sh` copies them over
+from `../aiangel-pod/dashboard/web/`, and refuses when that folder is behind this repo (it would
+delete the Story tab). A pod picks up the new image the next time it is created or restarted.
+
+### The backend patch (`backend/`)
+
+The upstream server only takes pictures, so the Story tab's blocking video needs two files
+replaced in the image:
+
+| File in the image | Change |
+|---|---|
+| `/opt/aiangel/dashboard/server.py` | the upload route also takes `.mp4 .mov .webm .mkv` (up to 200 MB, streamed to disk); a clip request takes `ref_videos` (up to 3); a free-prompt clip can carry its own queue `label` |
+| `/opt/comfyui/custom_nodes.baked/ComfyUI-AiAngel/h3_workflows.py` | each reference video goes `LoadVideo` → cut to the clip's frame count → fitted to the clip's size → `MiniMaxH3ReferenceToVideo`'s `ref_videos` slot |
+
+A clip without a video builds exactly the same graph as before. `backend/original/` holds the
+untouched files from `BASE_IMAGE`: `diff -u backend/original/server.py
+backend/opt/aiangel/dashboard/server.py` shows the whole patch, and the build stops if the base
+image's files ever differ from them.
 
 ## RunPod template settings
 
@@ -69,12 +91,28 @@ GitHub makes a new package **private**. Either:
 ## Deploying a pod
 
 Same as the original template: a **CUDA 13.0+** host with **32 GB+ VRAM** (H3 needs it), on NVMe.
-Open **Connect → 8189** for the dashboard. It shows the boot and the model downloads, and the
-**Shopee** tab is the third tab. When you are done, download your clips, then **Stop** and
+Open **Connect → 8189** for the dashboard. It shows the boot and the model downloads. **Shopee**
+is the third tab and **Story** the fourth. When you are done, download your clips, then **Stop** and
 **Terminate**.
+
+## Story tab: blocking videos from Blender
+
+1. Block the scene with simple shapes or mannequins, give each character its own colour, and
+   animate the camera.
+2. Render at **24 fps**, at the scene's shape (576×1024, 1024×576 or 768×768) and length, as an
+   H.264 MP4. The tab's "How to render it in Blender" box has a script that sets all of this up.
+3. Add the MP4 to the scene (or drop it on the form) and pick what H3 follows: **Camera only**,
+   **Camera + blocking**, or **Loose timing**. "Fit shots to the video" makes the shots add up to
+   the video's length.
+
+The video is cut to the scene's length and cropped to its shape on the pod. It is a reference,
+not a control signal: H3 follows it the way its prompt guide describes reference videos, so
+expect the camera and the timing to carry over, not every pose. The story is kept in the browser.
+A blocking video is not, so on a new pod add it again.
 
 ## Updating to a newer AI Angel image
 
-`BASE_IMAGE` is pinned on purpose: the Shopee tab replaces `app.js` and `index.html`, so a newer
-upstream image could change the server under them. To move up, put the new digest in
-`BASE_IMAGE`, merge the upstream changes into `dashboard/web/`, test, and push.
+`BASE_IMAGE` is pinned on purpose: the tabs replace `app.js` and `index.html`, and `backend/`
+replaces two server files, so a newer upstream image could change things under them. To move
+up, put the new digest in `BASE_IMAGE`, merge the upstream changes into `dashboard/web/`, re-apply
+the `backend/` patch to the new files (and copy them to `backend/original/`), test, and push.

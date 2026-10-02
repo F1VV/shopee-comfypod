@@ -4,6 +4,12 @@ name: Build RunPod image
 # dashboard files on top. crane appends one small layer to the base inside the registry, so the
 # runner never unpacks the ~5 GB base. No models are in the image: the pod downloads the presets
 # named in MODELS when it starts.
+#
+# The layer also replaces two backend files (backend/opt/...): the dashboard's server.py and the
+# H3 graph builder, patched so the Story tab can send a Blender blocking video as <Video 1>. They
+# are whole files, so the build first checks that the base image still has exactly the files the
+# patch was made from (backend/original/); a new BASE_IMAGE with changed files stops the build
+# instead of quietly putting old code over new.
 on:
   push:
     branches: [main]
@@ -21,10 +27,35 @@ jobs:
 
       - uses: imjasonh/setup-crane@v0.4
 
-      - name: Pack the dashboard files as one layer
+      - name: Log in to ghcr.io
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: crane auth login ghcr.io -u "$GITHUB_ACTOR" -p "$TOKEN"
+
+      - name: Check the backend patch still fits the base image
+        run: |
+          base="$(tr -d ' \r\n' < BASE_IMAGE)"
+          python3 -m py_compile backend/opt/aiangel/dashboard/server.py \
+            backend/opt/comfyui/custom_nodes.baked/ComfyUI-AiAngel/h3_workflows.py
+          mkdir -p base-files
+          crane export "$base" - | tar -x -C base-files --wildcards \
+            '*opt/aiangel/dashboard/server.py' \
+            '*opt/comfyui/custom_nodes.baked/ComfyUI-AiAngel/h3_workflows.py'
+          for f in server.py h3_workflows.py; do
+            found="$(find base-files -name "$f" -type f)"
+            if ! cmp -s "$found" "backend/original/$f"; then
+              echo "::error::$f in BASE_IMAGE is not the file backend/ was patched from. Re-apply the patch to the new file (diff backend/original/$f against backend/opt/.../$f) and update backend/original/."
+              diff -u "backend/original/$f" "$found" | head -40
+              exit 1
+            fi
+          done
+          echo "base image backend files match backend/original/"
+
+      - name: Pack the dashboard and backend files as one layer
         run: |
           mkdir -p layer/opt/aiangel/dashboard
           cp -r dashboard/web layer/opt/aiangel/dashboard/web
+          cp -r backend/opt/. layer/opt/
           find layer -type d -exec chmod 755 {} +
           find layer -type f -exec chmod 644 {} +
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='2026-01-01 00:00Z' \
@@ -32,13 +63,10 @@ jobs:
           tar -tvf web.tar
 
       - name: Append it to the base image and push
-        env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           base="$(tr -d ' \r\n' < BASE_IMAGE)"
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           tag="${GITHUB_SHA::7}"
-          crane auth login ghcr.io -u "$GITHUB_ACTOR" -p "$TOKEN"
           crane append -b "$base" -f web.tar -t "$image:$tag"
           # MODELS defaults to what the Shopee tab uses, so a pod started without the template's
           # variable still downloads it; the template's own MODELS overrides this. The source
@@ -46,7 +74,7 @@ jobs:
           crane mutate "$image:$tag" -t "$image:$tag" \
             --env "MODELS=$(tr -d ' \r\n' < MODELS)" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.description=Shopee ComfyPod: AI Angel ComfyPod with the Shopee affiliate tab" \
+            --label "org.opencontainers.image.description=Shopee ComfyPod: AI Angel ComfyPod with the Shopee and Story tabs" \
             --label "org.opencontainers.image.base.name=$base"
           crane tag "$image:$tag" latest
           crane config "$image:latest" | python3 -c "import json,sys; c=json.load(sys.stdin)['config']; print('Entrypoint', c.get('Entrypoint'), 'Ports', list(c.get('ExposedPorts', {})), [e for e in c.get('Env', []) if e.startswith('MODELS=')])"

@@ -700,3 +700,84 @@ select { width: auto; padding: 7px 10px; font-family: var(--sans); }
 .sp-pick-item input { width: auto; margin: 0; box-shadow: none; accent-color: var(--violet); }
 .sp-pick-item img { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; }
 #spAddBatch { white-space: nowrap; }
+
+/* ---------------- Story tab (story.js, added for this workspace) ---------------- */
+#tab-story .mode-row { margin-bottom: 4px; }
+.st-wide { margin-top: 12px; }
+.st-wide input, .st-wide textarea { width: 100%; }
+#stLogline { resize: vertical; font-family: var(--sans); line-height: 1.5; }
+.st-chips { flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.st-chip { font: 400 12px var(--sans); color: var(--ink-2); background: var(--s2); border: 0; border-radius: 999px; box-shadow: var(--key); padding: 4px 10px; cursor: pointer; }
+.st-chip:hover { color: var(--ink); }
+
+/* the cast: a photo, three short fields, and the speaker tag */
+#stCast { display: grid; gap: 10px; margin: 4px 0; }
+.st-member { display: flex; align-items: flex-start; gap: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.st-member .sp-thumb { cursor: pointer; }
+.st-member .sp-thumb:hover { box-shadow: var(--violet) 0 0 0 2px; }
+.st-nopic { display: grid; place-items: center; width: 100%; height: 100%; font: 400 11px var(--mono); color: var(--ink-3); border: 1px dashed var(--line); border-radius: 10px; box-sizing: border-box; }
+.st-member-fields { flex: 1; min-width: 0; display: grid; gap: 6px; }
+.st-member-fields input { width: 100%; padding: 6px 10px; font-size: 13px; }
+.st-member-fields .st-name { font-weight: 600; }
+.st-member-acts { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: 0 0 auto; }
+.st-member-acts .x { background: none; border: 0; color: var(--ink-3); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
+.st-member-acts .x:hover { color: var(--ink); }
+.st-place { display: flex; gap: 12px; align-items: flex-start; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.st-place-body { flex: 1; min-width: 0; display: grid; gap: 6px; justify-items: start; }
+.st-place-body p { margin: 0; }
+.st-place-body input { width: 100%; padding: 6px 10px; font-size: 13px; }
+
+/* scenes: one button per scene, the open one is the form below */
+.st-scenes-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 22px 0 0; padding-top: 18px; border-top: 1px solid var(--line); }
+.st-scenes { flex-wrap: wrap; max-width: 100%; }
+.st-scenes button { display: inline-flex; align-items: center; gap: 7px; max-width: 220px; }
+.st-scenes button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-scenes button b { font: 500 11px var(--mono); color: var(--ink-3); }
+.st-has-video { font-style: normal; font-size: 9px; color: var(--violet); }
+.st-state { font: 400 10px var(--mono); font-style: normal; border-radius: 4px; padding: 1px 5px; }
+.st-state.queued { color: var(--run); background: var(--run-tint); }
+.st-state.failed { color: var(--coral); background: var(--coral-tint); }
+.st-scene-links { gap: 14px; margin: 0; }
+.st-scene .sp-fields { margin-top: 8px; }
+
+/* the blocking video */
+.st-blocking { margin: 16px 0 6px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; background: var(--s1); }
+.st-blocking-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.st-blocking-head i { font-style: normal; }
+.st-video { display: flex; gap: 14px; align-items: flex-start; }
+.st-video video, .st-video-gone { flex: 0 0 auto; width: 220px; max-height: 220px; border-radius: 10px; background: #000; box-shadow: var(--key); }
+.st-video-gone { height: 124px; display: grid; place-items: center; font-size: 12px; color: var(--ink-3); }
+.st-video-info { display: grid; gap: 4px; min-width: 0; }
+.st-video-info b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#stFollowRow { display: grid; gap: 6px; justify-items: start; }
+#stFollowRow p { margin: 0; }
+#stFollow { flex-wrap: wrap; }
+.st-blender summary { cursor: pointer; color: var(--ink-2); }
+.st-blender ol { margin: 8px 0; padding-left: 20px; display: grid; gap: 4px; }
+.st-code { white-space: pre; overflow: auto; max-height: 260px; margin: 6px 0; padding: 10px 12px; background: var(--canvas); border-radius: 8px; box-shadow: var(--key); color: var(--ink-2); }
+
+/* shots */
+.st-shots-title { margin-top: 18px; }
+.st-shots-title i { font-style: normal; font-weight: 400; font-size: 12px; color: var(--ink-3); margin-left: 6px; }
+.st-shot-head { flex-wrap: wrap; }
+.st-shot-head select { max-width: 190px; }
+.st-secs { display: inline-flex; align-items: center; gap: 4px; font: 400 12px var(--mono); color: var(--ink-3); }
+.st-secs input { width: 62px; padding: 4px 6px; font-size: 13px; text-align: center; }
+.st-lines { display: grid; gap: 6px; }
+.st-line { display: flex; gap: 8px; align-items: center; }
+.st-line select { flex: 0 0 auto; max-width: 130px; padding: 6px 8px; font-size: 13px; }
+.st-line .sp-line { flex: 1; min-width: 0; }
+.st-line .x { background: none; border: 0; color: var(--ink-3); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
+.st-shot-acts { margin: 0; }
+#stLook { flex-wrap: wrap; }
+#stAll { white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .st-member { flex-wrap: wrap; }
+  .st-member-fields { flex-basis: 100%; order: 3; }
+  .st-member-acts { flex-direction: row; margin-left: auto; }
+  .st-video { flex-direction: column; }
+  .st-video video, .st-video-gone { width: 100%; }
+  .st-line { flex-wrap: wrap; }
+  .st-line .sp-line { flex-basis: 100%; order: 3; }
+}

@@ -81,7 +81,9 @@
     DEMO ? "" : `api/outputs/file?path=${encodeURIComponent(p)}${download ? "&download=1" : ""}`;
 
   /* ---------------- tabs + keyboard ---------------- */
-  const TABS = ["overview", "create", "shopee", "models", "outputs", "keys", "logs"];
+  const TABS = ["overview", "create", "shopee", "story", "models", "outputs", "keys", "logs"];
+  // the Queue card lives in whichever making tab is open; the others keep an empty slot for it
+  const QUEUE_SLOTS = { shopee: "spQueueSlot", story: "stQueueSlot" };
   function showTab(name) {
     for (const t of TABS) $("#tab-" + t).hidden = t !== name;
     for (const b of $$(".tabs button")) b.setAttribute("aria-selected", b.dataset.tab === name);
@@ -89,16 +91,18 @@
     if (name === "outputs") loadOutputs();
     if (name === "create") { loadLoraChoices(); loadImageModels(); }
     if (name === "logs") loadLog();
-    // one queue for both making tabs: the card moves to whichever of them is open
-    if (name === "shopee") $("#spQueueSlot")?.replaceWith($("#queueCard"));
+    // one queue for every making tab: the card moves to whichever of them is open
     const queueCard = $("#queueCard");
-    if (name === "create" && !$("#createSide").contains(queueCard)) {
-      queueCard.replaceWith(el("div", { id: "spQueueSlot" }));
-      $("#createSide").prepend(queueCard);
+    const from = queueCard.closest(".tab").id.slice(4);
+    if ((name === "create" || QUEUE_SLOTS[name]) && from !== name) {
+      if (QUEUE_SLOTS[from]) queueCard.replaceWith(el("div", { id: QUEUE_SLOTS[from] }));
+      if (name === "create") $("#createSide").prepend(queueCard);
+      else $("#" + QUEUE_SLOTS[name]).replaceWith(queueCard);
     }
     if (name === "shopee") window.ShopeeTab?.shown();
+    if (name === "story") window.StoryTab?.shown();
     // a clip started before this tab was opened (or before a reload) is still ours to show
-    if (name === "create" || name === "shopee") genPoll();
+    if (name === "create" || QUEUE_SLOTS[name]) genPoll();
   }
   $$(".tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
   $$("[data-goto]").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.goto)));
@@ -1347,11 +1351,18 @@
     } catch (e) { toast(e.message, true); return null; }
     const missing = new Set(r.missing_refs || []);
     const name = path.split("/").pop();
-    // a clip the Shopee tab made goes back into that tab's form, not the Create form
+    // A clip the Shopee or Story tab made goes back into that tab's form, not the Create form.
+    // Nothing is returned, so "Make it 720p" stops here instead of pressing the Create form's
+    // button on whatever that form holds; the tab's own 720p box remakes it.
     if (r.form?.shopee && window.ShopeeTab) {
       showTab("shopee");
       window.ShopeeTab.loadRecipe(r, name);
-      return r;
+      return null;
+    }
+    if (r.form?.story && window.StoryTab) {
+      showTab("story");
+      window.StoryTab.loadRecipe(r, name);
+      return null;
     }
     if (r.kind === "image") {
       setMedium("image");

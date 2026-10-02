@@ -1,0 +1,904 @@
+/* Story tab, added for this workspace (not part of the upstream template).
+
+   A story is told in scenes, each one H3 clip (up to 15 s). The story itself holds what every
+   scene shares: who is in it (a photo keeps a face the same from scene to scene), where and when
+   it happens, and how it looks. Each scene is a list of shots with camera, action and dialogue,
+   and can carry a blocking render from Blender as <Video 1>: H3's prompt guide uses a reference
+   video for "the original video's camera movement, cuts, rhythm, or temporal structure", so the
+   grey animatic sets the camera and the blocking while the photos set the faces and the place.
+
+   The H3 prompt is written here in the browser (the same document shape prompt_build.py makes)
+   and sent as a free prompt to beginner/start, with the pictures in `refs` and the blocking video
+   in `ref_videos` (backend/ in this repo patches server.py and h3_workflows.py for that). The clip
+   lands in the shared Queue and in Outputs like any other.
+
+   The story is kept in this browser's localStorage, pictures included (scaled down), so it
+   outlives a terminated pod: a picture is uploaded again the first time it is used on another
+   pod. A blocking video is too big for that and has to be added again on a new pod. */
+(() => {
+  "use strict";
+
+  const A = window.AiAngel;
+  if (!A) return;
+  const { api, el, $, $$, toast, copy, DEMO } = A;
+
+  /* ---------------- what the form offers ---------------- */
+
+  const LOOKS = {
+    film: "Live-action, photorealistic, cinematic film look, anamorphic lens, natural film grain, motivated lighting",
+    drama: "Live-action, photorealistic, Thai TV drama look, soft flattering light, clean colors",
+    vlog: "Live-action, photorealistic, shot on a smartphone, handheld, natural light, social-media vlog style",
+    cg: "Stylized 3D animated film, soft global illumination, expressive characters, rich colors",
+    anime: "2D anime style, clean line art, cel shading, painted backgrounds",
+  };
+  const SIZES = ["Extreme wide shot", "Wide shot", "Full shot", "Medium shot", "Medium close-up",
+    "Close-up", "Extreme close-up", "Over-the-shoulder shot", "POV shot", "Top-down shot", "Low-angle shot"];
+  // [label, what H3 is told]
+  const MOVES = {
+    blocking: ["As in the blocking video", "camera exactly as in <Video 1>"],
+    static: ["Static", "static camera"],
+    push: ["Push in", "slow push-in"],
+    pull: ["Pull out", "slow pull-out"],
+    panl: ["Pan left", "pan left"],
+    panr: ["Pan right", "pan right"],
+    tiltu: ["Tilt up", "tilt up"],
+    tiltd: ["Tilt down", "tilt down"],
+    track: ["Tracking", "tracking shot following the action"],
+    hand: ["Handheld", "handheld camera"],
+    orbit: ["Orbit", "camera orbits around the subject"],
+    craneu: ["Crane up", "crane up"],
+    craned: ["Crane down", "crane down"],
+  };
+  // how closely H3 is told to follow the blocking render (retention terms from H3's prompt guide)
+  const FOLLOW = {
+    camera: "The camera path, framing and cuts come from the video. What people do comes from the shots below.",
+    full: "The camera, and where each character stands and moves, come from the video. The shots below say who they are and what they do.",
+    timing: "Only the rhythm of the cuts is borrowed, loosely. For a rough animatic.",
+  };
+  const SHAPES = { "9:16": [576, 1024], "16:9": [1024, 576], "1:1": [768, 768] };  // h3_workflows.SIZES
+  const MAX_SECONDS = 15;  // server.py CLIP_SECONDS_MAX
+  const MAX_CAST = 5;
+  const MAX_TAKES = 4;     // server.py MAX_TAKES
+  const FPS = 24;
+
+  /* ---------------- state ---------------- */
+  const KEY = "aiangel.story.v1";
+  const CHARS_KEY = "aiangel.story.chars.v1";
+  const SHOPEE_LIB = "aiangel.shopee.library.v1";  // the Shopee tab's saved characters, offered here too
+
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const newShot = (seconds = 3) => ({ id: uid(), seconds, size: "Medium shot", move: "static", what: "", lines: [] });
+  const newScene = (n = 1) => ({
+    id: uid(), title: `Scene ${n}`, where: "", when: "", sound: "",
+    shots: [newShot(3), newShot(3)],
+    blocking: null,  // {file, pod, name, duration, width, height, follow}
+  });
+  const blank = () => ({
+    title: "", logline: "", where: "", when: "", look: "film", lookText: "", aspect: "16:9",
+    music: "", takes: 1, hd: false, fast: false,
+    place: null,  // {file, pod, thumb, what}
+    cast: [],     // [{id, libId, name, who, voice, file, pod, thumb}]
+    scenes: [newScene(1)], at: 0,
+  });
+
+  const loadJson = (key, fallback) => {
+    try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
+  };
+  const saveJson = (key, value) => {
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
+  };
+
+  // what only lives while a picture or video is uploading
+  const settle = (st) => {
+    for (const x of [st.place, ...st.cast, ...st.scenes.map((sc) => sc.blocking)]) if (x) delete x.busy;
+    if (st.place && !st.place.thumb) st.place = null;
+    for (const sc of st.scenes) if (sc.blocking && !sc.blocking.file) sc.blocking = null;
+    return st;
+  };
+
+  let S = settle(Object.assign(blank(), loadJson(KEY, {})));
+  if (!S.scenes.length) S.scenes = [newScene(1)];
+  S.at = Math.min(S.at || 0, S.scenes.length - 1);
+  const scene = () => S.scenes[S.at];
+
+  let saveTimer;
+  function save() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      if (!saveJson(KEY, S)) toast("The browser's storage is full: remove a character photo", true);
+    }, 200);
+  }
+
+  // blob URLs of the blocking videos picked in this page session, by filename on the pod
+  const videoUrls = new Map();
+  const pod = () => ($("#podId")?.textContent || "").trim();
+
+  /* ---------------- pictures and videos ---------------- */
+
+  // a picture shrunk to fit `max` px, as a JPEG data URL — small enough for localStorage
+  function shrink(src, max = 1024) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.naturalWidth * k);
+        c.height = Math.round(img.naturalHeight * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL("image/jpeg", 0.88));
+      };
+      img.onerror = () => reject(new Error("could not read that picture"));
+      img.src = src;
+    });
+  }
+
+  async function upload(file) {
+    if (DEMO) return `demo_${Math.random().toString(36).slice(2, 8)}${/\.\w+$/.exec(file.name)?.[0] || ".png"}`;
+    return A.uploadPicture(file);  // the same upload route; backend/server.py lets it take a video
+  }
+
+  // a stored picture's file on THIS pod: uploaded again from its thumbnail when it was put on
+  // another pod
+  async function onPod(item, name) {
+    if (item.busy) throw new Error(`${name}: the picture is still uploading`);
+    if (item.file && (item.pod === pod() || DEMO)) return item.file;
+    if (!item.thumb) throw new Error(`${name}: the picture is gone, add it again`);
+    const blob = await (await fetch(item.thumb)).blob();
+    item.file = await upload(new File([blob], `${name.replace(/\W+/g, "_") || "picture"}.jpg`, { type: "image/jpeg" }));
+    item.pod = pod();
+    save();
+    return item.file;
+  }
+
+  async function pickPicture(f) {
+    const url = URL.createObjectURL(f);
+    try {
+      const [file, thumb] = await Promise.all([upload(f), shrink(url, 1024)]);
+      return { file, thumb, pod: pod() };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function videoInfo(url) {
+    return new Promise((resolve, reject) => {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.muted = true;
+      v.onloadedmetadata = () => resolve({ duration: v.duration, width: v.videoWidth, height: v.videoHeight });
+      v.onerror = () => reject(new Error("this browser cannot read the video; export it as an H.264 MP4"));
+      v.src = url;
+    });
+  }
+
+  /* ---------------- the prompt ---------------- */
+
+  // H3 renders on the 17k+5 frame grid at 24 fps (prompt_build.clip_seconds)
+  const clipSeconds = (s) => {
+    const f = Math.max(5, Math.round(s * FPS));
+    // Python's % never goes negative; JavaScript's does, so it is brought back into 0..16
+    return (f + (((5 - (f % 17)) % 17) + 17) % 17) / FPS;
+  };
+  const timecode = (t) => `${String(Math.floor(t / 60)).padStart(2, "0")}:${(t % 60).toFixed(2).padStart(5, "0")}`;
+  const sceneSeconds = (sc = scene()) => sc.shots.reduce((n, s) => n + (Number(s.seconds) || 0), 0);
+  const isThai = (t) => /[฀-๿]/.test(t);
+  const end = (t) => { t = t.trim().replace(/[ ,;:]+$/, ""); return !t || /[.!?]$/.test(t) ? t : t + "."; };
+  const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  const trim = (t) => (t || "").trim().replace(/[ .,]+$/, "");
+  const look = () => trim(S.lookText) || LOOKS[S.look];
+  const shape = () => ({ "9:16": "vertical", "16:9": "horizontal", "1:1": "square" })[S.aspect];
+  const castName = (c, i) => c.name.trim() || `Character ${i + 1}`;
+
+  // the pictures in the order H3 numbers them: the cast with a photo first, then the place
+  function refsFor() {
+    const files = [], picOf = new Map();
+    for (const c of S.cast) if (c.thumb || c.file) picOf.set(c.id, files.push(c));
+    const placePic = S.place?.thumb || S.place?.file ? files.push(S.place) : 0;
+    return { files, picOf, placePic };
+  }
+
+  function buildPrompt(sc = scene()) {
+    const { picOf, placePic } = refsFor();
+    const blk = sc.blocking?.file ? sc.blocking : null;
+    const follow = blk?.follow || "full";
+    const where = trim(sc.where) || trim(S.where);
+    const when = trim(sc.when) || trim(S.when);
+    const anyRef = picOf.size > 0 || placePic > 0 || !!blk;
+
+    // Who a character is called in the text. With any reference, H3 gets <Subject N> definitions
+    // (as prompt_build.py does); with none it is plain text-to-video, so a character is named by
+    // their own description the first time and by name after that.
+    const seen = new Set();
+    const call = (i) => {
+      if (anyRef) return `<Subject ${i + 1}>`;
+      const c = S.cast[i], name = castName(c, i);
+      if (seen.has(i) || !c.who.trim()) return name;
+      seen.add(i);
+      return `${name} (${trim(c.who)})`;
+    };
+    // "@Mali" in the user's words; the longest names first, so "@Mali Jr" is not read as "@Mali"
+    const mentions = (text) => {
+      const order = S.cast.map((c, i) => [castName(c, i), i]).sort((a, b) => b[0].length - a[0].length);
+      let out = text;
+      for (const [name, i] of order) {
+        const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        out = out.replace(new RegExp(`@${esc}(?![\\w\\u0E00-\\u0E7F])`, "gi"), () => call(i));
+      }
+      return out;
+    };
+
+    const parts = [];
+    if (anyRef) {
+      parts.push("subject_definitions:");
+      S.cast.forEach((c, i) => {
+        const n = `<Subject ${i + 1}>`, pic = picOf.get(c.id), who = trim(c.who);
+        if (pic) {
+          parts.push(`${n} is ${castName(c, i)}${who ? `, ${who},` : ""} in <Picture ${pic}>. Use <Picture ${pic}> as the exact reference for their face, hair and outfit.`);
+        } else {
+          parts.push(`${n} is ${castName(c, i)}${who ? `, ${who}` : ""}. No reference picture — invent their appearance and keep it the same in every shot.`);
+        }
+      });
+      if (placePic) {
+        const what = trim(S.place.what) || where || "the location";
+        parts.push(`The scene takes place in ${what} shown in <Picture ${placePic}>. Use <Picture ${placePic}> as the exact reference for the setting, not for anyone's face.`);
+      }
+      if (blk) {
+        const use = {
+          camera: "Use <Video 1> only as the reference for the camera movement, the framing and the cuts, in time.",
+          full: "Use <Video 1> as the reference for the camera movement, the framing, the cuts, and where each character stands and moves, in time; its grey figures stand for the characters defined here.",
+          timing: "Use <Video 1> only loosely, for the rhythm and pacing of the cuts.",
+        }[follow];
+        parts.push(`<Video 1> is an untextured grey 3D blocking animation (previz) of this scene. ${use} Do not copy its grey, untextured look: the real characters, the place and the light replace the blocking shapes.`);
+      }
+      parts.push("");
+    }
+
+    // the summary carries the story, so a scene is never shot without its context
+    const first = sc.shots.find((s) => s.what.trim());
+    const title = sc.title.trim() ? ` "${sc.title.trim()}"` : "";
+    const summary = [
+      `${anyRef ? "[reference generation]" : "[text to video]"} A ${/photoreal/i.test(look()) ? "photorealistic " : ""}${shape()} story scene${title}${where ? ` in ${where}` : ""}.`,
+      S.logline.trim() && `The story: ${end(S.logline.trim())}`,
+      when && `It is ${when}.`,
+      first && end(cap(mentions(first.what.trim()))),
+    ].filter(Boolean).join(" ");
+    parts.push("summary:", summary, "");
+
+    if (anyRef) {
+      parts.push("retention_analysis:");
+      S.cast.forEach((c, i) => {
+        const pic = picOf.get(c.id);
+        parts.push(pic
+          ? `<Subject ${i + 1}>: fully_preserved - face, hairstyle, skin tone and outfit from <Picture ${pic}> stay identical in every frame.`
+          : `<Subject ${i + 1}>: their invented appearance stays the same in every frame.`);
+      });
+      if (placePic) parts.push(`setting: fully_preserved - the location from <Picture ${placePic}> stays identical in every frame.`);
+      if (blk) {
+        parts.push({
+          camera: "<Video 1> (camera movement, framing and cuts): partially_preserved - follow its camera path in time; its grey untextured look is not kept.",
+          full: "<Video 1> (camera movement, blocking and timing): partially_preserved - follow its camera path and the characters' positions in time; its grey untextured look is not kept.",
+          timing: "<Video 1> (cut and pacing structure): weak_reference",
+        }[follow]);
+      }
+      parts.push("");
+    }
+
+    // each shot's share of the real, quantised clip length, so the last one ends on it
+    const total = sceneSeconds(sc) || 1, length = clipSeconds(total);
+    let at = 0;
+    const shots = sc.shots.map((s, i) => {
+      const start = (length * at) / total;
+      at += Number(s.seconds) || 0;
+      const stop = (length * at) / total;
+      const move = s.move === "blocking" && !blk ? "static" : s.move;
+      let line = `[Shot ${i + 1}] ${timecode(start)}-${timecode(stop)}: ${s.size}, ${MOVES[move]?.[1] || "static camera"}.`;
+      const what = mentions(s.what.trim());
+      if (what) line += ` ${end(cap(what))}`;
+      for (const ln of s.lines) {
+        const text = ln.text.trim();
+        if (!text) continue;
+        const k = Math.max(0, S.cast.findIndex((c) => c.id === ln.who));
+        // (S1) names who speaks; the tagged form is the one measured to come back word for word
+        line += ` ${S.cast[k] ? call(k) : "The narrator"} says (S${k + 1}) <d>[${isThai(text) ? "Thai" : "English"}] ${text}</d>.`;
+      }
+      return line;
+    });
+    parts.push("detailed_description:",
+      [look(), when && cap(when), `${shape()} ${S.aspect}`].filter(Boolean).join(", ") + ".",
+      ...shots, "");
+
+    const speaks = sc.shots.some((s) => s.lines.some((l) => l.text.trim()));
+    const voices = speaks
+      ? S.cast.map((c, i) => c.voice.trim() && `${call(i)}'s voice: ${trim(c.voice)}`).filter(Boolean) : [];
+    const sound = trim(sc.sound) || trim(S.music) || "Ambient sound that matches the setting";
+    parts.push("overall_soundscape:", [sound, ...voices].map(cap).join(". ") + ".");
+    return parts.join("\n");
+  }
+
+  /* ---------------- drawing ---------------- */
+
+  const setSeg = (id, key, value) =>
+    $$(`#${id} button`).forEach((b) => b.setAttribute("aria-pressed", b.dataset[key] === String(value)));
+  const msg = (t) => { $("#stMsg").textContent = t; };
+
+  function thumb(src, n, onRemove, busy) {
+    return el("span", { class: `sp-thumb${busy ? " busy" : ""}`, title: n ? `Picture ${n}` : null },
+      src ? el("img", { src, alt: n ? `Picture ${n}` : "" }) : el("span", { class: "st-nopic", text: "+ photo" }),
+      n ? el("b", { text: String(n) }) : null,
+      onRemove ? el("button", { class: "x", type: "button", title: "Remove the photo", onclick: onRemove }, "×") : null);
+  }
+
+  const input = (value, placeholder, onInput, cls = "") => {
+    const i = el("input", { class: cls, spellcheck: "false", placeholder, value });
+    i.addEventListener("input", () => onInput(i.value));
+    return i;
+  };
+
+  function drawCast() {
+    const { picOf } = refsFor();
+    $("#stCast").replaceChildren(...S.cast.map((c, i) => {
+      const file = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp", hidden: true });
+      file.addEventListener("change", async () => {
+        const f = file.files[0];
+        if (!f) return;
+        c.busy = true;
+        drawCast();
+        try { Object.assign(c, await pickPicture(f)); } catch (e) { msg(`${f.name}: ${e.message}`); }
+        delete c.busy;
+        changed(true);
+      });
+      const pic = thumb(c.thumb, picOf.get(c.id), c.thumb ? () => {
+        Object.assign(c, { file: null, thumb: null, pod: null });
+        changed(true);
+      } : null, c.busy);
+      pic.classList.add("st-pick");
+      pic.title = c.thumb ? `Picture ${picOf.get(c.id)} · click to change` : "Add a photo of their face";
+      pic.addEventListener("click", (e) => { if (!e.target.closest(".x")) file.click(); });
+      return el("div", { class: "st-member" },
+        pic, file,
+        el("div", { class: "st-member-fields" },
+          // the speaker lists show the name; the cast itself is not redrawn under the cursor
+          input(c.name, "Name, e.g. Mali", (v) => { c.name = v; drawShots(); changed(); }, "st-name"),
+          input(c.who, "Who they are, e.g. a shy Thai student, 20, in a school uniform", (v) => { c.who = v; changed(); }),
+          input(c.voice, "Voice, e.g. a soft, nervous young woman's voice", (v) => { c.voice = v; changed(); })),
+        el("div", { class: "st-member-acts" },
+          el("span", { class: "tag mono", title: "Speaker tag in the prompt", text: `S${i + 1}` }),
+          el("button", { class: "link", type: "button", title: "Keep in this browser for other stories", onclick: () => saveChar(c) }, "Save"),
+          el("button", { class: "x", type: "button", title: "Remove from the story", onclick: () => {
+            S.cast.splice(i, 1);
+            for (const sc of S.scenes) for (const s of sc.shots) s.lines = s.lines.filter((l) => l.who !== c.id);
+            changed(true);
+          } }, "×")));
+    }));
+    if (!S.cast.length) {
+      $("#stCast").append(el("p", { class: "empty", text: "Nobody yet. Add the people in the story; a photo keeps the same face in every scene." }));
+    }
+    $("#stAddCast").hidden = S.cast.length >= MAX_CAST;
+    drawSaved();
+  }
+
+  const savedChars = () => loadJson(CHARS_KEY, []);
+  function drawSaved() {
+    const shopee = (loadJson(SHOPEE_LIB, {}).chars || []).map((c) => ({ ...c, shopee: true }));
+    const inStory = new Set(S.cast.map((c) => c.libId));
+    const chips = [...savedChars(), ...shopee].filter((c) => !inStory.has(c.id)).map((c) =>
+      el("span", { class: "sp-chip" },
+        el("button", { class: "sp-chip-use", type: "button", title: c.shopee ? "Saved in the Shopee tab" : "Add to the story", onclick: () => {
+          if (S.cast.length >= MAX_CAST) return toast(`Up to ${MAX_CAST} characters`, true);
+          S.cast.push({ id: uid(), libId: c.id, name: c.name, who: c.who || "", voice: c.voiceText || "", thumb: c.img || null, file: null, pod: null });
+          changed(true);
+        } }, c.img ? el("img", { src: c.img, alt: "" }) : null, el("span", { text: c.name })),
+        c.shopee ? null : el("button", { class: "x", type: "button", title: "Delete from this browser", onclick: () => {
+          if (!confirm(`Delete the saved character "${c.name}"?`)) return;
+          saveJson(CHARS_KEY, savedChars().filter((x) => x.id !== c.id));
+          drawSaved();
+        } }, "×")));
+    $("#stSaved").replaceChildren(...chips);
+    $("#stSaved").hidden = !chips.length;
+  }
+
+  function saveChar(c) {
+    if (!c.name.trim()) return toast("Give them a name first", true);
+    const item = { id: c.libId || uid(), name: c.name.trim(), who: c.who.trim(), voiceText: c.voice.trim(), img: c.thumb };
+    const list = savedChars().filter((x) => x.id !== item.id && x.name !== item.name);
+    if (!saveJson(CHARS_KEY, [...list, item])) return toast("The browser's storage is full", true);
+    c.libId = item.id;
+    toast(`Saved ${item.name}`);
+    save();
+  }
+
+  function drawPlace() {
+    const { placePic } = refsFor();
+    const p = S.place;
+    $("#stPlacePic").replaceChildren(p
+      ? thumb(p.thumb, placePic, p.busy ? null : () => { S.place = null; changed(true); }, p.busy)
+      : el("span", { class: "sp-nophoto", text: "no photo" }));
+    $("#stPlaceWhat").hidden = !p;
+    if ($("#stPlaceWhat").value !== (p?.what || "")) $("#stPlaceWhat").value = p?.what || "";
+  }
+
+  function drawScenes() {
+    $("#stScenes").replaceChildren(...S.scenes.map((sc, i) => {
+      const b = el("button", { type: "button", "aria-pressed": String(i === S.at), title: `${sceneSeconds(sc)} s` },
+        el("b", { class: "mono", text: String(i + 1) }), el("span", { text: sc.title.trim() || `Scene ${i + 1}` }),
+        sc.blocking?.file ? el("i", { class: "st-has-video", title: "has a blocking video", text: "▶" }) : null,
+        sc.state ? el("i", { class: `st-state ${sc.state}`, text: sc.state }) : null);
+      b.addEventListener("click", () => { S.at = i; drawScenes(); drawScene(); drawPreview(); save(); });
+      return b;
+    }));
+  }
+
+  function drawScene() {
+    const sc = scene();
+    $("#stSceneNo").textContent = String(S.at + 1);
+    $("#stSceneTitle").value = sc.title;
+    $("#stSceneWhere").value = sc.where;
+    $("#stSceneWhere").placeholder = trim(S.where) || "where this scene happens";
+    $("#stSceneWhen").value = sc.when;
+    $("#stSceneWhen").placeholder = trim(S.when) || "e.g. the next morning";
+    $("#stSceneSound").value = sc.sound;
+    $("#stSceneSound").placeholder = trim(S.music) || "Ambient sound that matches the setting";
+    $("#stDelScene").hidden = S.scenes.length < 2;
+    drawBlocking();
+    drawShots();
+  }
+
+  function drawShots() {
+    const sc = scene();
+    const video = !!sc.blocking?.file;
+    $("#stShots").replaceChildren(...sc.shots.map((s, i) => {
+      const secs = el("input", { type: "number", min: "0.5", max: String(MAX_SECONDS), step: "0.5", value: String(s.seconds), title: "Seconds" });
+      secs.addEventListener("input", () => { s.seconds = Math.max(0, Number(secs.value) || 0); changed(); });
+      const size = el("select", { title: "Shot size" }, ...SIZES.map((n) => el("option", { value: n, text: n })));
+      size.value = s.size;
+      size.addEventListener("change", () => { s.size = size.value; changed(); });
+      const move = el("select", { title: "Camera" },
+        ...Object.entries(MOVES).filter(([k]) => k !== "blocking" || video).map(([k, [label]]) => el("option", { value: k, text: label })));
+      move.value = s.move === "blocking" && !video ? "static" : s.move;
+      move.addEventListener("change", () => { s.move = move.value; changed(); });
+      const what = el("textarea", { class: "sp-what", rows: "2", spellcheck: "false",
+        placeholder: i === 0 ? "@Mali runs into the rain-soaked alley and stops when she sees @Ken" : "what happens, in English; @Name for a character" });
+      what.value = s.what;
+      what.addEventListener("input", () => { s.what = what.value; changed(); });
+      const lines = s.lines.map((ln, j) => {
+        const who = el("select", { title: "Who says it" }, ...S.cast.map((c, k) => el("option", { value: c.id, text: castName(c, k) })));
+        if (!S.cast.some((c) => c.id === ln.who) && S.cast[0]) ln.who = S.cast[0].id;
+        who.value = ln.who;
+        who.addEventListener("change", () => { ln.who = who.value; changed(); });
+        return el("div", { class: "st-line" }, who,
+          input(ln.text, "what they say, Thai or English", (v) => { ln.text = v; changed(); }, "sp-line"),
+          el("button", { class: "x", type: "button", title: "Remove the line", onclick: () => { s.lines.splice(j, 1); drawShots(); changed(); } }, "×"));
+      });
+      return el("div", { class: "sp-shot" },
+        el("div", { class: "sp-shot-head st-shot-head" },
+          el("span", { class: "shot-no mono", text: String(i + 1) }),
+          size, move,
+          el("label", { class: "st-secs" }, secs, el("span", { text: "s" })),
+          el("span", { class: "spacer" }),
+          i > 0 ? el("button", { class: "x", type: "button", title: "Move up", onclick: () => {
+            sc.shots.splice(i - 1, 0, sc.shots.splice(i, 1)[0]); drawShots(); changed();
+          } }, "↑") : null,
+          sc.shots.length > 1 ? el("button", { class: "x", type: "button", title: "Remove this shot", onclick: () => {
+            sc.shots.splice(i, 1); drawShots(); changed();
+          } }, "×") : null),
+        el("label", { class: "sp-sub" }, el("span", { text: "What happens" }), what),
+        lines.length ? el("div", { class: "sp-sub" }, el("span", { text: "Dialogue" }), el("div", { class: "st-lines" }, ...lines)) : null,
+        S.cast.length ? el("div", { class: "row tight st-shot-acts" },
+          el("button", { class: "link", type: "button", onclick: () => {
+            // the next line goes to the next person, so a conversation is typed straight down
+            const last = s.lines[s.lines.length - 1];
+            const next = last ? S.cast[(S.cast.findIndex((c) => c.id === last.who) + 1) % S.cast.length] : S.cast[0];
+            s.lines.push({ who: next.id, text: "" });
+            drawShots();
+            changed();
+            $$(".sp-line", $("#stShots").children[i]).pop()?.focus();
+          } }, "+ Dialogue line")) : null);
+    }));
+    drawLength();
+  }
+
+  function drawLength() {
+    const n = sceneSeconds();
+    $("#stLength").textContent = `${Math.round(n * 10) / 10}s`;
+    const blk = scene().blocking;
+    const notes = [];
+    if (n > MAX_SECONDS) notes.push(`H3 makes up to ${MAX_SECONDS} s a scene: shorten a shot or split the scene`);
+    if (blk?.duration && Math.abs(blk.duration - n) > 0.25) notes.push(`the blocking video is ${blk.duration.toFixed(1)} s`);
+    $("#stLengthNote").textContent = notes.join(" · ");
+    $("#stStart").disabled = n > MAX_SECONDS || n < 1;
+    $("#stStart").textContent = S.takes > 1 ? `Make ${S.takes} takes` : "Make this scene";
+    $("#stAll").textContent = `Make all ${S.scenes.length} scenes`;
+    $("#stAll").hidden = S.scenes.length < 2;
+  }
+
+  function drawBlocking() {
+    const blk = scene().blocking;
+    $("#stFollowRow").hidden = !blk?.file;
+    $("#stBlockingFit").hidden = !blk?.duration;
+    $("#stBlockingRemove").hidden = !blk;
+    $("#stBlockingBtn").textContent = blk ? "Replace video" : "+ Add blocking video";
+    if (!blk) {
+      $("#stBlocking").replaceChildren(el("p", { class: "empty", text: "No blocking video. H3 frames each shot from the camera and action written below." }));
+      return;
+    }
+    setSeg("stFollow", "follow", blk.follow || "full");
+    $("#stFollowNote").textContent = FOLLOW[blk.follow || "full"];
+    const url = videoUrls.get(blk.file);
+    const [w, h] = SHAPES[S.aspect];
+    const warn = [];
+    if (blk.width && Math.abs(blk.width / blk.height - w / h) > 0.02) {
+      warn.push(`It is ${blk.width}×${blk.height} and the scene is ${S.aspect}, so its sides get cropped. Render it at ${w}×${h}.`);
+    }
+    if (blk.file && blk.pod && blk.pod !== pod() && !DEMO) warn.push("It was uploaded to another pod: add it again.");
+    $("#stBlocking").replaceChildren(el("div", { class: "st-video" },
+      url ? el("video", { src: url, controls: true, muted: true, loop: true, playsinline: true, preload: "metadata" })
+        : el("div", { class: "st-video-gone mono", text: blk.busy ? "uploading…" : "on the pod" }),
+      el("div", { class: "st-video-info" },
+        el("b", { text: blk.name || "blocking video" }),
+        el("span", { class: "small dim mono", text: [blk.duration && `${blk.duration.toFixed(2)} s`, blk.width && `${blk.width}×${blk.height}`, blk.busy ? "uploading…" : "<Video 1>"].filter(Boolean).join(" · ") }),
+        ...warn.map((t) => el("span", { class: "small warn-note", text: t })))));
+  }
+
+  function drawPreview() {
+    $("#stPreview").textContent = buildPrompt();
+    const { files } = refsFor();
+    const vid = scene().blocking?.file ? " + 1 video" : "";
+    $("#stRefsNote").textContent = `scene ${S.at + 1} · ${files.length} picture${files.length === 1 ? "" : "s"}${vid}`;
+  }
+
+  function drawAll() {
+    $("#stTitle").value = S.title;
+    $("#stLogline").value = S.logline;
+    $("#stWhere").value = S.where;
+    $("#stWhen").value = S.when;
+    $("#stLookText").value = S.lookText;
+    $("#stLookText").placeholder = LOOKS[S.look];
+    $("#stMusic").value = S.music;
+    setSeg("stAspect", "aspect", S.aspect);
+    setSeg("stLook", "look", S.look);
+    setSeg("stTakes", "takes", S.takes);
+    $("#stHd").checked = S.hd;
+    const needsFast = (A.needs().fast || []).length > 0;
+    $("#stFast").disabled = needsFast;
+    $("#stFast").checked = S.fast && !needsFast;
+    $("#stFastRow").title = needsFast ? "Fast needs the h3fast models: download them in Models" : "4 steps instead of 8: about 1.5x faster.";
+    drawCast();
+    drawPlace();
+    drawScenes();
+    drawScene();
+    drawPreview();
+  }
+
+  // `cast` = picture numbers, names or the speaker lists may have changed
+  function changed(cast = false) {
+    if (cast) { drawCast(); drawPlace(); drawShots(); }
+    // an edited scene is no longer the one that was queued
+    if (scene().state) { delete scene().state; drawScenes(); }
+    drawLength();
+    drawPreview();
+    save();
+  }
+
+  /* ---------------- blocking video ---------------- */
+
+  async function setBlocking(f) {
+    const sc = scene();
+    const url = URL.createObjectURL(f);
+    let meta = {};
+    try { meta = await videoInfo(url); } catch (e) { msg(e.message); }
+    sc.blocking = { file: null, pod: null, name: f.name, follow: sc.blocking?.follow || "full", busy: true, ...meta };
+    drawBlocking();
+    try {
+      const file = await upload(f);
+      videoUrls.set(file, url);
+      Object.assign(sc.blocking, { file, pod: pod() });
+      // a new blocking video takes over the camera of every shot still on the default
+      for (const s of sc.shots) if (s.move === "static") s.move = "blocking";
+      msg(meta.duration && Math.abs(meta.duration - sceneSeconds(sc)) > 0.25
+        ? `The video is ${meta.duration.toFixed(1)} s and the shots add up to ${sceneSeconds(sc)} s: "Fit shots to the video" lines them up.`
+        : "The blocking video is in. It goes to H3 as <Video 1>.");
+    } catch (e) {
+      sc.blocking = null;
+      URL.revokeObjectURL(url);
+      msg(/unsupported file type/.test(e.message)
+        ? "This pod's image cannot take a video yet: start the pod from the latest Shopee ComfyPod image."
+        : `${f.name}: ${e.message}`);
+    }
+    if (sc.blocking) delete sc.blocking.busy;
+    if (sc === scene()) drawScene();
+    drawScenes();
+    changed();
+  }
+
+  // scale every shot so they add up to the video's length (at most 15 s), in half seconds
+  function fitToVideo() {
+    const sc = scene(), d = sc.blocking?.duration;
+    if (!d) return;
+    const target = Math.min(Math.round(d * 2) / 2, MAX_SECONDS), total = sceneSeconds(sc) || 1;
+    let left = target;
+    sc.shots.forEach((s, i) => {
+      const rest = sc.shots.length - 1 - i;  // half a second kept for every shot still to come
+      const share = i === sc.shots.length - 1 ? left : Math.round((s.seconds / total) * target * 2) / 2;
+      s.seconds = Math.max(0.5, Math.min(share, left - rest * 0.5));
+      left -= s.seconds;
+    });
+    drawShots();
+    changed();
+    msg(d > MAX_SECONDS
+      ? `The video is ${d.toFixed(1)} s; H3 makes ${MAX_SECONDS} s at most, so only its first ${MAX_SECONDS} s are used.`
+      : `The shots now add up to ${sceneSeconds(sc)} s.`);
+  }
+
+  function blenderScript() {
+    const [w, h] = SHAPES[S.aspect];
+    const secs = Math.min(sceneSeconds() || 5, MAX_SECONDS);
+    const n = S.at + 1;
+    return `# Blocking render for ${scene().title.trim() || `scene ${n}`}. Paste into Blender's Scripting tab,
+# press Run Script, then Render > Render Animation.
+import bpy
+s = bpy.context.scene
+s.render.fps, s.render.fps_base = ${FPS}, 1   # H3 makes 24 fps: the guide lines up frame for frame
+s.render.resolution_x, s.render.resolution_y = ${w}, ${h}   # the clip's ${S.aspect} size
+s.render.resolution_percentage = 100
+s.frame_end = s.frame_start + ${Math.round(secs * FPS)} - 1   # ${secs} s
+s.render.engine = "BLENDER_WORKBENCH"   # quick grey previz
+s.display.shading.light = "STUDIO"
+s.display.shading.color_type = "OBJECT"   # each figure keeps its own flat colour
+if hasattr(s.render.image_settings, "media_type"):   # Blender 5
+    s.render.image_settings.media_type = "VIDEO"
+s.render.image_settings.file_format = "FFMPEG"
+s.render.ffmpeg.format, s.render.ffmpeg.codec = "MPEG4", "H264"
+s.render.ffmpeg.constant_rate_factor = "MEDIUM"
+s.render.ffmpeg.audio_codec = "NONE"
+s.render.filepath = "//blocking_scene${n}_"
+`;
+  }
+
+  /* ---------------- making ---------------- */
+
+  async function requestFor(sc, i) {
+    const seconds = sceneSeconds(sc);
+    if (seconds > MAX_SECONDS) throw new Error(`it is ${seconds} s; H3 makes up to ${MAX_SECONDS} s`);
+    if (seconds < 1) throw new Error("give its shots some seconds");
+    if (!sc.shots.some((s) => s.what.trim())) throw new Error("say what happens in at least one shot");
+    const blk = sc.blocking;
+    if (blk?.busy) throw new Error("its blocking video is still uploading");
+    if (blk?.file && blk.pod && blk.pod !== pod() && !DEMO) throw new Error("its blocking video is on another pod: add it again");
+    const refs = [];
+    for (const item of refsFor().files) refs.push(await onPod(item, item === S.place ? "place" : item.name || "character"));
+    return {
+      mode: "free", prompt: buildPrompt(sc), seconds, aspect: S.aspect, refs,
+      ref_videos: blk?.file ? [blk.file] : [],
+      label: `${S.title.trim() ? S.title.trim() + " · " : ""}${i + 1}. ${sc.title.trim() || `Scene ${i + 1}`}`,
+      count: S.takes, hd: S.hd, fast: S.fast && !$("#stFast").disabled, sparse: true, upscale: false, loras: [],
+      // stored beside the clip, so "Use this recipe" in Outputs brings the story back here
+      form: { story: snapshot(i) },
+    };
+  }
+
+  // the story as it was for this clip, without the pictures themselves (a recipe is capped at
+  // 64 KB): the files on the pod stand for them
+  function snapshot(i) {
+    const strip = (x) => x && { ...x, thumb: undefined, busy: undefined };
+    return {
+      ...S, at: i, place: strip(S.place), cast: S.cast.map(strip),
+      scenes: S.scenes.map((sc) => ({ ...sc, state: undefined, blocking: strip(sc.blocking) })),
+    };
+  }
+
+  async function makeScenes(indexes) {
+    $("#stStart").disabled = $("#stAll").disabled = true;
+    msg("");
+    let queued = 0;
+    try {
+      for (const i of indexes) {
+        const sc = S.scenes[i];
+        try {
+          const r = await api("beginner/start", await requestFor(sc, i));
+          queued += r.jobs?.length || S.takes;
+          sc.state = "queued";
+        } catch (e) {
+          sc.state = "failed";
+          throw new Error(`Scene ${i + 1}: ${e.message}`);
+        } finally {
+          drawScenes();
+        }
+      }
+      msg(`Queued ${queued} clip${queued === 1 ? "" : "s"}. ${indexes.length > 1 ? "The scenes run one after another" : "It shows up"} in the Queue, then in Outputs.`);
+      A.genPoll();
+    } catch (e) {
+      msg((queued ? `${queued} queued, then: ` : "") + e.message);
+    } finally {
+      $("#stAll").disabled = false;
+      drawLength();
+      save();
+    }
+  }
+
+  function loadRecipe(r) {
+    const st = r.form?.story;
+    if (!st) return;
+    const busy = S.scenes.some((sc) => sc.shots.some((s) => s.what.trim()));
+    if (busy && !confirm("Replace the story in the Story tab with the one this clip was made from?")) return;
+    const here = pod();
+    // the recipe names files on the pod it was made on; they show here through refUrl
+    const keep = (x) => x && { ...x, pod: here, thumb: x.file && !DEMO ? A.refUrl(x.file) : null };
+    S = settle(Object.assign(blank(), st, {
+      place: keep(st.place), cast: (st.cast || []).map(keep),
+      scenes: (st.scenes || []).map((sc) => ({ ...sc, blocking: sc.blocking && { ...sc.blocking, pod: here } })),
+    }));
+    if (!S.scenes.length) S.scenes = [newScene(1)];
+    S.at = Math.min(st.at || 0, S.scenes.length - 1);
+    // a refUrl thumbnail is a link to this pod; keep a copy of the picture so the story outlives it
+    for (const item of [S.place, ...S.cast].filter((x) => x?.thumb)) {
+      shrink(item.thumb, 1024).then((t) => { item.thumb = t; save(); }).catch(() => {});
+    }
+    drawAll();
+    save();
+    msg(r.missing_refs?.length
+      ? "Some of its pictures are not on this pod: add them again."
+      : `Scene ${S.at + 1} of the story this clip was made from is back.`);
+  }
+
+  /* ---------------- wiring ---------------- */
+
+  const bindText = (id, key) => $(id).addEventListener("input", (e) => { S[key] = e.target.value; changed(); });
+  bindText("#stTitle", "title");
+  bindText("#stLogline", "logline");
+  bindText("#stWhere", "where");
+  bindText("#stWhen", "when");
+  bindText("#stLookText", "lookText");
+  bindText("#stMusic", "music");
+  // the scene's own fields show the story's values as their placeholders
+  for (const id of ["#stWhere", "#stWhen", "#stMusic"]) $(id).addEventListener("change", drawScene);
+
+  const bindScene = (id, key) => $(id).addEventListener("input", (e) => {
+    scene()[key] = e.target.value;
+    if (key === "title") drawScenes();
+    changed();
+  });
+  bindScene("#stSceneTitle", "title");
+  bindScene("#stSceneWhere", "where");
+  bindScene("#stSceneWhen", "when");
+  bindScene("#stSceneSound", "sound");
+
+  $$("#stAspect button").forEach((b) => b.addEventListener("click", () => {
+    S.aspect = b.dataset.aspect;
+    setSeg("stAspect", "aspect", S.aspect);
+    drawBlocking();
+    if ($("#stBlenderShow").open) $("#stBlenderCode").textContent = blenderScript();
+    changed();
+  }));
+  $$("#stLook button").forEach((b) => b.addEventListener("click", () => {
+    S.look = b.dataset.look;
+    setSeg("stLook", "look", S.look);
+    $("#stLookText").placeholder = LOOKS[S.look];
+    changed();
+  }));
+  $$("#stTakes button").forEach((b) => b.addEventListener("click", () => {
+    S.takes = Math.min(MAX_TAKES, Number(b.dataset.takes));
+    setSeg("stTakes", "takes", S.takes);
+    changed();
+  }));
+  $$("#stFollow button").forEach((b) => b.addEventListener("click", () => {
+    if (!scene().blocking) return;
+    scene().blocking.follow = b.dataset.follow;
+    drawBlocking();
+    changed();
+  }));
+  $$("#stWhenChips button").forEach((b) => b.addEventListener("click", () => {
+    const now = trim(S.when);
+    S.when = now ? `${now}, ${b.textContent}` : b.textContent;
+    $("#stWhen").value = S.when;
+    drawScene();
+    changed();
+  }));
+  $("#stHd").addEventListener("change", (e) => { S.hd = e.target.checked; save(); });
+  $("#stFast").addEventListener("change", (e) => { S.fast = e.target.checked; save(); });
+
+  $("#stAddCast").addEventListener("click", () => {
+    if (S.cast.length >= MAX_CAST) return;
+    S.cast.push({ id: uid(), name: "", who: "", voice: "", file: null, thumb: null, pod: null });
+    changed(true);
+    $$("#stCast .st-name").pop()?.focus();
+  });
+  $("#stPlaceBtn").addEventListener("click", () => $("#stPlaceFile").click());
+  $("#stPlaceFile").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    S.place = { what: S.place?.what || trim(S.where), busy: true };
+    drawPlace();
+    try {
+      Object.assign(S.place, await pickPicture(f));
+      delete S.place.busy;
+    } catch (err) {
+      S.place = null;
+      msg(`${f.name}: ${err.message}`);
+    }
+    changed(true);
+  });
+  $("#stPlaceWhat").addEventListener("input", (e) => { if (S.place) { S.place.what = e.target.value; changed(); } });
+
+  function goScene(i) {
+    S.at = i;
+    drawScenes();
+    drawScene();
+    changed();
+  }
+  $("#stAddScene").addEventListener("click", () => {
+    const sc = newScene(S.scenes.length + 1);
+    sc.sound = scene().sound;
+    S.scenes.splice(S.at + 1, 0, sc);
+    goScene(S.at + 1);
+    $("#stSceneTitle").select();
+  });
+  $("#stDupScene").addEventListener("click", () => {
+    const twin = JSON.parse(JSON.stringify(scene()));
+    Object.assign(twin, { id: uid(), title: `${twin.title} (copy)` });
+    delete twin.state;
+    S.scenes.splice(S.at + 1, 0, twin);
+    goScene(S.at + 1);
+  });
+  $("#stDelScene").addEventListener("click", () => {
+    if (S.scenes.length < 2 || !confirm(`Delete scene ${S.at + 1}?`)) return;
+    S.scenes.splice(S.at, 1);
+    goScene(Math.max(0, S.at - 1));
+  });
+  $("#stAddShot").addEventListener("click", () => {
+    const s = newShot(3);
+    if (scene().blocking?.file) s.move = "blocking";
+    scene().shots.push(s);
+    drawShots();
+    changed();
+    $$("#stShots .sp-what").pop()?.focus();
+  });
+
+  $("#stBlockingBtn").addEventListener("click", () => $("#stBlockingFile").click());
+  $("#stBlockingFile").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (f) setBlocking(f);
+  });
+  $("#stBlockingRemove").addEventListener("click", () => {
+    const sc = scene();
+    sc.blocking = null;
+    for (const s of sc.shots) if (s.move === "blocking") s.move = "static";
+    drawScene();
+    drawScenes();
+    changed();
+  });
+  $("#stBlockingFit").addEventListener("click", fitToVideo);
+  $("#stBlenderCopy").addEventListener("click", () => copy(blenderScript(), "Blender script"));
+  $("#stBlenderShow").addEventListener("toggle", (e) => {
+    if (e.target.open) $("#stBlenderCode").textContent = blenderScript();
+  });
+
+  // a video dropped anywhere on the form is the current scene's blocking render
+  const card = $("#stCard");
+  card.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); });
+  card.addEventListener("drop", (e) => {
+    const f = e.dataTransfer.files[0];
+    if (!f) return;
+    e.preventDefault();
+    if (f.type.startsWith("video/")) setBlocking(f);
+    else toast("Drop a video for the blocking render; photos go on a character or the place", true);
+  });
+
+  $("#stStart").addEventListener("click", () => makeScenes([S.at]));
+  $("#stAll").addEventListener("click", () => {
+    const n = S.scenes.length;
+    if (confirm(`Queue all ${n} scenes, ${S.takes} take${S.takes > 1 ? "s" : ""} each?`)) makeScenes(S.scenes.map((_, i) => i));
+  });
+  $("#stCopyPrompt").addEventListener("click", () => copy(buildPrompt(), "Prompt"));
+  $("#stNew").addEventListener("click", () => {
+    if (!confirm("Start a new story? This one is cleared; saved characters stay.")) return;
+    S = blank();
+    drawAll();
+    save();
+    msg("");
+  });
+
+  window.StoryTab = { shown: drawAll, loadRecipe };
+  drawAll();
+})();
