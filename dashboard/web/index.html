@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Angel ComfyPod · Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <img class="mark" src="logo-mark.png" alt="" width="37" height="28">
+    <span class="brand-name">AI Angel <b>ComfyPod</b></span>
+    <span class="ver mono" id="appVersion" hidden></span>
+    <span class="pod-id mono" id="podId">—</span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="overview" aria-selected="true">Overview <kbd>1</kbd></button>
+    <button role="tab" data-tab="create">Create <kbd>2</kbd></button>
+    <button role="tab" data-tab="shopee">Shopee <kbd>3</kbd></button>
+    <button role="tab" data-tab="models">Models <kbd>4</kbd></button>
+    <button role="tab" data-tab="outputs">Outputs <kbd>5</kbd></button>
+    <button role="tab" data-tab="keys">Keys <kbd>6</kbd></button>
+    <button role="tab" data-tab="logs">Logs <kbd>7</kbd></button>
+  </nav>
+  <a class="btn brand open-comfy" id="openComfyTop" target="_blank" rel="noopener">Open ComfyUI <span aria-hidden="true">↗</span></a>
+</header>
+
+<main>
+  <!-- OVERVIEW -->
+  <section class="tab" id="tab-overview">
+    <div class="hero">
+      <div class="hero-text">
+        <p class="eyebrow mono" id="heroEyebrow">COMFYUI · PORT 8188</p>
+        <h1 id="heroTitle">Checking ComfyUI…</h1>
+        <p class="sub" id="heroSub">This page works even while ComfyUI starts, so you can watch the boot here.</p>
+      </div>
+      <div class="hero-actions">
+        <a class="btn brand big" id="openComfy" target="_blank" rel="noopener">Open ComfyUI <span aria-hidden="true">↗</span></a>
+        <button class="btn" id="restartComfy">Restart ComfyUI</button>
+      </div>
+    </div>
+
+    <div class="meters" id="meters"></div>
+
+    <div class="grid two">
+      <div class="card">
+        <div class="card-head"><h2>Services</h2><span class="hint">Passwords are generated at first boot and kept on your volume.</span></div>
+        <div id="services"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Models at boot</h2><button class="link" data-goto="models">Manage →</button></div>
+        <p class="mono small dim" id="modelsEnv"></p>
+        <div id="presetSummary"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Latest outputs</h2><button class="link" data-goto="outputs">All outputs →</button></div>
+      <div class="strip" id="latestOutputs"></div>
+    </div>
+  </section>
+
+  <!-- MAKE A CLIP -->
+  <section class="tab" id="tab-create" hidden>
+    <div class="section-title row-between">
+      <div>
+        <h1>Create</h1>
+        <p class="sub">Describe it, press one button. Clips run the AiAngelH3 workflow, images run
+          Qwen Image 2.1 — both the same graphs you can open in ComfyUI.</p>
+      </div>
+      <div class="seg big-seg" id="createMedium">
+        <button data-medium="clip" aria-pressed="true">Clip</button>
+        <button data-medium="image">Image</button>
+      </div>
+    </div>
+
+    <div class="grid two wide-left">
+      <div>
+      <div class="card" id="clipCard">
+        <div class="mode-row">
+          <div class="opt">
+            <span class="opt-k">Pictures</span>
+            <div class="seg" id="clipSource">
+              <button data-source="ref" aria-pressed="true">Reference</button>
+              <button data-source="frame">Frame</button>
+            </div>
+          </div>
+          <div class="opt">
+            <span class="opt-k">Prompt</span>
+            <div class="seg" id="genMode">
+              <button data-mode="guided" aria-pressed="true">Guided</button>
+              <button data-mode="free">Write the prompt myself</button>
+            </div>
+          </div>
+          <!-- Shape sits up here, not down by the button: it decides the shape of the crop box
+               on every pinned frame, so it has to be chosen before the pictures go in. -->
+          <div class="opt">
+            <span class="opt-k">Shape</span>
+            <div class="seg aspect" id="genAspect">
+              <button data-aspect="9:16" aria-pressed="true"><i class="ar r916"></i>9:16</button>
+              <button data-aspect="16:9"><i class="ar r169"></i>16:9</button>
+              <button data-aspect="1:1"><i class="ar r11"></i>1:1</button>
+            </div>
+          </div>
+          <div class="opt">
+            <span class="opt-k">Takes</span>
+            <div class="seg" id="genTakes">
+              <button data-takes="1" aria-pressed="true">×1</button>
+              <button data-takes="2">×2</button>
+              <button data-takes="4">×4</button>
+            </div>
+          </div>
+          <div class="opt">
+            <span class="opt-k">Seed</span>
+            <input class="idx mono" type="number" id="genSeed" placeholder="random" min="0"
+              max="2147483647">
+            <em class="hint">the same number gives the same clip back</em>
+            <button class="link" id="genSeedLast" type="button" hidden></button>
+          </div>
+        </div>
+        <p class="small dim" id="clipSourceNote">H3 copies the face, the place or the outfit out of
+          a reference picture, but nothing says which frame it belongs to.</p>
+
+        <section class="step" id="genFrameStep" hidden>
+          <h3><b class="n">1</b> Pinned frames</h3>
+          <p class="small dim">Each picture becomes that exact frame of the clip, and H3 fills in
+            what happens between them. Type the frame number yourself: 0 is the first frame, and
+            -1 is the last one.</p>
+          <p class="small dim mono" id="genFrameHint">120 frames at 24 fps · 0 to 119</p>
+          <div id="genPins"></div>
+          <div class="row tight">
+            <button class="link" id="genAddPin" type="button">+ Add a frame</button>
+            <input id="genPinFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+          </div>
+        </section>
+
+        <div id="genGuided">
+          <section class="step" id="genCastStep">
+            <h3><b class="n">1</b> <span id="genCastTitle">Who is in it</span></h3>
+            <p class="small dim" id="genCastHelp">A photo keeps a real face across every frame.
+              Someone without a photo is invented by H3 — fine for the other half of a
+              conversation.</p>
+            <div id="genCast"></div>
+            <div class="row tight">
+              <button class="link" id="genAddPhoto" type="button">+ Add a photo</button>
+              <button class="link" id="genAddPerson" type="button">+ Add someone with no photo</button>
+              <input id="genRefs" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+            </div>
+          </section>
+
+          <section class="step">
+            <h3><b class="n">2</b> What happens</h3>
+            <p class="small dim">Type <span class="mono">@</span> to pick someone or a picture you
+              added above, so H3 knows exactly who does what.</p>
+            <div class="field" id="genActionField"></div>
+            <p class="small warn-note" id="genActionThai" hidden>Write what happens in English. H3
+              performs an English instruction, but a Thai one tends to come back spoken instead of
+              acted — Thai belongs in the spoken lines below, where it works.</p>
+            <h4 class="sub-label">Look, light and time of day</h4>
+            <div class="field" id="genStyleField"></div>
+            <h4 class="sub-label">Sound and music</h4>
+            <div class="field" id="genSoundField"></div>
+            <h4 class="sub-label">LoRA <i>optional</i></h4>
+            <div id="genLoras"></div>
+            <div class="row tight">
+              <button class="link" id="genAddLora" type="button">+ Add a LoRA</button>
+            </div>
+          </section>
+
+          <section class="step">
+            <h3><b class="n">3</b> Shots and dialogue <i>optional</i></h3>
+            <p class="small dim">Each shot picks its own length, and the clip is as long as they
+              add up to — that is how a back-and-forth gets paced. One shot is fine.</p>
+            <div id="genShots"></div>
+            <div class="row tight">
+              <button class="link" id="genAddShot" type="button">+ Add a shot</button>
+            </div>
+          </section>
+        </div>
+
+        <div id="genFree" hidden>
+          <label class="field">
+            <span>H3 prompt <i>sent exactly as written</i></span>
+            <textarea id="genPrompt" rows="14" spellcheck="false"></textarea>
+          </label>
+          <button class="link" id="genLoadExample">Load the example prompt</button>
+        </div>
+
+        <div class="render">
+          <div class="render-row">
+            <div class="opt toggles">
+              <label class="toggle" id="genUpscaleRow"
+                title="Renders the clip at 704×1280 (or the same pixels in the frame you picked) from the start. About 1.8x the time of the normal size.">
+                <input type="checkbox" id="genUpscale"> <span>720p</span>
+              </label>
+              <label class="toggle fast" id="genFastRow"
+                title="4 steps with a turbo LoRA mix instead of 8: about 1.5x faster.">
+                <input type="checkbox" id="genFast"> <span>Fast</span> <em>quality drops slightly</em>
+              </label>
+              <button class="link need-dl" id="genFastGet" type="button" hidden>Download Fast models</button>
+              <label class="toggle" id="genSparseRow"
+                title="Skips attention blocks the clip does not need. Measured on an RTX PRO 6000: a 10s 720p clip in 100s instead of 140s, with the picture very slightly different. Every clip of 3 s or longer uses it; a 2 s clip at normal size is too short for it and runs as before. Turn it off if a clip looks wrong.">
+                <input type="checkbox" id="genSparse" checked> <span>Sparse attention</span> <em>faster on long clips</em>
+              </label>
+            </div>
+          </div>
+          <div class="render-row go">
+            <p class="small dim clip-len">Clip length <b class="mono" id="genLength">5s</b>
+              <span class="warn-note" id="genLengthNote"></span></p>
+            <p class="estimate small" id="genEstimate"></p>
+            <span class="spacer"></span>
+            <div class="wf-menu">
+              <button class="btn ghost" id="genWorkflow" type="button" aria-haspopup="true">Workflow only ▾</button>
+              <div class="wf-pop" hidden>
+                <button type="button" data-wf="open">Open in ComfyUI ↗</button>
+                <button type="button" data-wf="download">Download .json</button>
+              </div>
+            </div>
+            <button class="btn brand big" id="genStart">Make the clip</button>
+          </div>
+        </div>
+        <p class="small dim" id="genMsg"></p>
+      </div>
+
+      <div class="card" id="imageCard" hidden>
+        <div class="mode-row">
+          <div class="opt">
+            <span class="opt-k">Picture</span>
+            <div class="seg" id="imgMode">
+              <button data-mode="t2i" aria-pressed="true">Text to image</button>
+              <button data-mode="edit">Edit a photo · keeps the face</button>
+            </div>
+          </div>
+          <div class="opt" id="imgSizeRow">
+            <span class="opt-k">Size</span>
+            <div class="seg" id="imgMegapixels">
+              <button data-megapixels="0.5">0.5 MP</button>
+              <button data-megapixels="1" aria-pressed="true">1 MP</button>
+              <button data-megapixels="2">2 MP</button>
+              <button data-megapixels="4">4 MP</button>
+            </div>
+            <em class="hint" id="imgSizeHint">1024 × 1024</em>
+          </div>
+          <div class="opt" id="imgAspectRow">
+            <span class="opt-k">Shape</span>
+            <div class="seg aspect" id="imgAspect">
+              <button data-aspect="9:16" aria-pressed="true"><i class="ar r916"></i>9:16</button>
+              <button data-aspect="16:9"><i class="ar r169"></i>16:9</button>
+              <button data-aspect="1:1"><i class="ar r11"></i>1:1</button>
+            </div>
+          </div>
+          <div class="opt">
+            <span class="opt-k">Takes</span>
+            <div class="seg" id="imgTakes">
+              <button data-takes="1" aria-pressed="true">×1</button>
+              <button data-takes="2">×2</button>
+              <button data-takes="4">×4</button>
+            </div>
+          </div>
+          <div class="opt">
+            <span class="opt-k">Seed</span>
+            <input class="idx mono" type="number" id="imgSeed" placeholder="random" min="0"
+              max="2147483647">
+            <em class="hint" id="imgSeedHint">the same number gives the same picture back</em>
+            <button class="link" id="imgSeedLast" type="button" hidden></button>
+          </div>
+          <div class="opt" id="imgModelRow" hidden>
+            <span class="opt-k">Model</span>
+            <div id="imgModel"></div>
+            <em class="hint">what makes the picture — it also decides which LoRAs fit</em>
+          </div>
+        </div>
+
+        <div class="need" id="imgNeed" hidden>
+          <div>
+            <b id="imgNeedTitle">Image models are not on this pod yet</b>
+            <p class="small dim" id="imgNeedText"></p>
+          </div>
+          <button class="btn primary" id="imgNeedGet" type="button">Download</button>
+        </div>
+
+        <section class="step" id="imgSourceStep" hidden>
+          <h3><b>1</b> <span id="imgSourceTitle">The photo to edit</span></h3>
+          <p class="small dim" id="imgSourceHint">The person in it keeps their face; your instruction
+            changes the rest — the outfit, the place, the light, the pose.</p>
+          <div class="img-source" id="imgSource"></div>
+          <div class="row tight">
+            <button class="link" id="imgUpload" type="button">+ Upload a photo</button>
+            <button class="link" id="imgFromOutputs" type="button">Pick from Outputs</button>
+            <input id="imgFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+          </div>
+          <div class="pick-strip" id="imgPicker" hidden></div>
+        </section>
+
+        <section class="step">
+          <h3 id="imgPromptTitle"><b>1</b> Describe the picture</h3>
+          <textarea id="imgPrompt" rows="5" spellcheck="false"
+            placeholder="A raw phone photo of a young Thai woman by a sunny cafe window, soft daylight"></textarea>
+          <h4 class="sub-label">LoRA <i>optional</i></h4>
+          <p class="small dim">A LoRA teaches the model one look, one body or one act. They stack,
+            so several can run at once — each at its own strength.</p>
+          <div id="imgLoras"></div>
+          <div class="row tight">
+            <button class="link" id="imgAddLora" type="button">+ Add a LoRA</button>
+          </div>
+        </section>
+
+        <div class="render">
+          <div class="render-row go">
+            <p class="estimate small" id="imgEstimate"></p>
+            <span class="spacer"></span>
+            <div class="wf-menu">
+              <button class="btn ghost" id="imgWorkflow" type="button" aria-haspopup="true">Workflow only ▾</button>
+              <div class="wf-pop" hidden>
+                <button type="button" data-wf="open">Open in ComfyUI ↗</button>
+                <button type="button" data-wf="download">Download .json</button>
+              </div>
+            </div>
+            <button class="btn brand big" id="imgStart">Make the image</button>
+          </div>
+        </div>
+        <p class="small dim" id="imgMsg"></p>
+      </div>
+      </div>
+
+      <div class="stack" id="createSide">
+        <!-- shared with the Shopee tab: app.js moves this card to whichever tab is open -->
+        <div class="card" id="queueCard">
+          <div class="card-head"><h2>Queue</h2><span class="hint" id="genStateHint">Nothing running</span>
+            <button class="link" id="genCancelAll" type="button" hidden>Cancel</button></div>
+          <div id="genQueue"><p class="empty">What you make shows up here, and in Outputs. Press the button again any time — it waits its turn.</p></div>
+        </div>
+        <div class="card" id="promptCard">
+          <div class="card-head"><h2>Prompt <span class="hint" id="genPreviewState">preview</span></h2>
+            <button class="link" id="genCopyPrompt" hidden>Edit it yourself →</button></div>
+          <pre class="mono small dim" id="genPreview">Guided mode writes the structured prompt H3 wants. It updates here as you type, so you can read it before you press the button — and take it into “Write the prompt myself” to change it.</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SHOPEE AFFILIATE (added for this workspace; shopee.js) -->
+  <section class="tab" id="tab-shopee" hidden>
+    <div class="section-title">
+      <h1>Shopee affiliate</h1>
+      <p class="sub">Product photos and a few words in, a vertical clip out: a hook, the product
+        working, and a call to the basket, spoken in Thai.</p>
+    </div>
+
+    <div class="grid two wide-left">
+      <div class="stack">
+      <div class="card" id="spCard">
+        <div class="mode-row">
+          <div class="opt">
+            <span class="opt-k">Video type</span>
+            <div class="seg" id="spStyle">
+              <button data-style="pov" aria-pressed="true">POV hands</button>
+              <button data-style="presenter">Presenter</button>
+              <button data-style="unboxing">Unboxing</button>
+              <button data-style="tryon">Try-on</button>
+              <button data-style="showcase">Showcase</button>
+            </div>
+          </div>
+          <div class="opt">
+            <span class="opt-k">Shape</span>
+            <div class="seg aspect" id="spAspect">
+              <button data-aspect="9:16" aria-pressed="true"><i class="ar r916"></i>9:16</button>
+              <button data-aspect="1:1"><i class="ar r11"></i>1:1</button>
+              <button data-aspect="16:9"><i class="ar r169"></i>16:9</button>
+            </div>
+          </div>
+          <div class="opt">
+            <span class="opt-k">Voice</span>
+            <div class="seg" id="spVoice">
+              <button data-voice="female" aria-pressed="true">Female · ค่ะ</button>
+              <button data-voice="male">Male · ครับ</button>
+            </div>
+          </div>
+          <div class="opt">
+            <span class="opt-k">Versions</span>
+            <div class="seg" id="spVariants">
+              <button data-variants="1" aria-pressed="true">×1</button>
+              <button data-variants="2">×2</button>
+              <button data-variants="3">×3</button>
+              <button data-variants="4">×4</button>
+            </div>
+            <em class="hint">each version opens with a different hook</em>
+          </div>
+        </div>
+        <p class="small dim" id="spStyleNote"></p>
+
+        <section class="step">
+          <h3><b class="n">1</b> Product</h3>
+          <p class="small dim">The Shopee listing photos work best: the product alone on a plain
+            background. H3 copies the product from them.</p>
+          <div class="sp-lib" id="spProductLib"></div>
+          <div class="sp-photos" id="spPhotos"></div>
+          <div class="row tight">
+            <button class="link" id="spAddPhoto" type="button">+ Add product photo</button>
+            <input id="spPhotoFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+          </div>
+          <div class="sp-fields">
+            <label class="field"><span>What it is <i>English, for the video model</i></span>
+              <input id="spEn" spellcheck="false" placeholder="a vitamin C face serum in a small glass dropper bottle"></label>
+            <label class="field"><span>Name to say <i>Thai, spoken in the clip</i></span>
+              <input id="spTh" spellcheck="false" placeholder="เซรั่มวิตซี"></label>
+            <label class="field"><span>Category</span>
+              <select id="spCat"></select></label>
+            <label class="field"><span>Price or deal <i>optional</i></span>
+              <input id="spPrice" spellcheck="false" placeholder="ลดเหลือ 199 บาท"></label>
+          </div>
+          <label class="field sp-points"><span>Selling points <i>Thai, one per line, up to 3</i></span>
+            <textarea id="spPoints" rows="3" spellcheck="false"
+              placeholder="ซึมไว ไม่เหนียวเหนอะหนะ&#10;หน้าใสขึ้นใน 7 วัน&#10;ขวดเดียวใช้ได้ 2 เดือน"></textarea></label>
+          <div class="row tight">
+            <button class="link" id="spSaveProduct" type="button">Save product to library</button>
+          </div>
+        </section>
+
+        <section class="step" id="spPersonStep">
+          <h3><b class="n">2</b> Presenter</h3>
+          <p class="small dim">A photo keeps the same face in every clip. Save it once as a
+            character and reuse it for every product.</p>
+          <div class="sp-lib" id="spCharLib"></div>
+          <div id="spPerson"></div>
+          <div class="row tight">
+            <button class="link" id="spUploadPerson" type="button">+ Use a photo</button>
+            <button class="link" id="spSaveChar" type="button">Save as character</button>
+            <input id="spPersonFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+          </div>
+        </section>
+
+        <section class="step">
+          <h3><b class="n" id="spScriptNo">3</b> Script <i>edit any line</i></h3>
+          <p class="small dim">Written for you from step 1: grab attention, show it working, then
+            point at the basket. What happens is in English for H3; what is said is in Thai.</p>
+          <div id="spShots"></div>
+          <p class="small warn-note" id="spScriptNote" hidden></p>
+          <div class="row tight">
+            <button class="link" id="spNewHook" type="button">↻ Another hook</button>
+            <button class="link" id="spNewCta" type="button">↻ Another ending</button>
+            <button class="link" id="spAddShot" type="button">+ Add a shot</button>
+            <button class="link" id="spReset" type="button">Reset script</button>
+          </div>
+        </section>
+
+        <section class="step">
+          <h3><b class="n" id="spLookNo">4</b> Look and sound</h3>
+          <div class="mode-row">
+            <div class="opt">
+              <span class="opt-k">Look</span>
+              <div class="seg" id="spLook">
+                <button data-look="ugc" aria-pressed="true">Phone video (UGC)</button>
+                <button data-look="studio">Studio ad</button>
+                <button data-look="cinematic">Cinematic</button>
+              </div>
+            </div>
+          </div>
+          <label class="field"><span>Where it is filmed</span>
+            <input id="spSetting" spellcheck="false"></label>
+          <div class="row tight">
+            <label class="toggle"><input type="checkbox" id="spMusic" checked> <span>Upbeat background music</span></label>
+            <label class="toggle" title="Hand-drawn pop lines, sparkles, arrows and text stickers, drawn on top of the finished clip">
+              <input type="checkbox" id="spDoodles"> <span>Doodle pop-ups</span> <em class="hint">added on top after the clip is made</em></label>
+          </div>
+        </section>
+
+        <div class="render">
+          <div class="render-row">
+            <div class="opt toggles">
+              <label class="toggle" title="Renders at 704×1280 from the start. About 1.8x the time.">
+                <input type="checkbox" id="spHd"> <span>720p</span>
+              </label>
+              <label class="toggle fast" id="spFastRow" title="4 steps instead of 8: about 1.5x faster.">
+                <input type="checkbox" id="spFast"> <span>Fast</span> <em>quality drops slightly</em>
+              </label>
+            </div>
+          </div>
+          <div class="render-row go">
+            <p class="small dim clip-len">Clip length <b class="mono" id="spLength">10s</b>
+              <span class="warn-note" id="spLengthNote"></span></p>
+            <span class="spacer"></span>
+            <button class="btn ghost" id="spCover" type="button"
+              title="A cover picture from the presenter and product photos, with Qwen Image 2.1">Make a cover image</button>
+            <button class="btn ghost" id="spAddBatch" type="button"
+              title="Keep this clip in the Batch list, change the form, add more, then queue them all at once">+ Add to batch</button>
+            <button class="btn brand big" id="spStart">Make the clip</button>
+          </div>
+        </div>
+        <p class="small dim" id="spMsg"></p>
+      </div>
+
+      <!-- doodle pop-ups (doodle.js): drawn over a finished clip in the browser, saved as a new MP4 -->
+      <div class="card" id="dlCard" hidden>
+        <div class="card-head"><h2>Doodle pop-ups</h2>
+          <span class="hint">drawn over a finished clip, then saved as a new video</span></div>
+        <div class="row tight dl-cliprow">
+          <span class="opt-k">Clip</span>
+          <select id="dlClip"></select>
+          <button class="link" id="dlReload" type="button" title="Look for new clips">↻</button>
+        </div>
+        <div class="dl-body">
+          <div class="dl-left">
+            <div class="dl-stage" id="dlStage">
+              <video id="dlVideo" playsinline preload="auto"></video>
+              <canvas id="dlCanvas"></canvas>
+            </div>
+            <div class="dl-transport">
+              <button class="btn ghost" id="dlPlay" type="button" aria-label="Play">▶</button>
+              <input type="range" id="dlSeek" min="0" max="10" step="0.01" value="0" aria-label="Time">
+              <span class="mono small" id="dlTime">0.0 s</span>
+            </div>
+          </div>
+          <div class="dl-side">
+            <div id="dlItems"></div>
+            <div class="row tight">
+              <select id="dlAddKind" aria-label="Kind of pop-up"></select>
+              <button class="link" id="dlAdd" type="button">+ Add at this moment</button>
+            </div>
+            <div class="row tight">
+              <button class="link" id="dlAuto" type="button">↻ Rebuild from the script</button>
+            </div>
+          </div>
+        </div>
+        <div class="render-row go dl-go">
+          <p class="small dim" id="dlMsg">Click the picture to move the selected pop-up.</p>
+          <span class="spacer"></span>
+          <button class="btn brand" id="dlExport" type="button">Save clip with pop-ups</button>
+        </div>
+      </div>
+      </div>
+
+      <div class="stack">
+        <div id="spQueueSlot"></div>
+        <div class="card" id="spBatchCard">
+          <div class="card-head"><h2>Batch <span class="hint" id="spBatchCount"></span></h2>
+            <span class="row tight sp-head-links">
+              <button class="link" id="spBatchProducts" type="button">+ Saved products</button>
+              <button class="link" id="spBatchClear" type="button">Clear</button>
+            </span></div>
+          <div class="sp-pick" id="spBatchPick" hidden></div>
+          <div id="spBatchList"></div>
+          <div class="row">
+            <button class="btn brand" id="spBatchGo" type="button" disabled>Queue all</button>
+          </div>
+          <p class="small dim" id="spBatchMsg"></p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Caption &amp; hashtags</h2>
+            <span class="row tight sp-head-links">
+              <button class="link" id="spCaptionRefresh" type="button">↻ Rewrite</button>
+              <button class="link" id="spCopyCaption" type="button">Copy</button>
+            </span></div>
+          <textarea id="spCaption" rows="12" spellcheck="false"></textarea>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Prompt <span class="hint" id="spPreviewState">preview</span></h2></div>
+          <pre class="mono small dim sp-preview" id="spPreview">The prompt H3 will get shows up here as you fill the form in.</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MODELS -->
+  <section class="tab" id="tab-models" hidden>
+    <div class="section-title">
+      <h1>Models</h1>
+      <p class="sub">Add a preset or paste links. Files already on the volume at full size are skipped.</p>
+    </div>
+    <div class="grid two wide-left">
+      <div class="card">
+        <div class="card-head"><h2>Presets</h2><span class="hint">From <span class="mono">MODELS</span> or added here, no restart needed</span></div>
+        <div id="presets"></div>
+      </div>
+      <div class="stack">
+        <div class="card">
+          <div class="card-head"><h2>Paste links</h2></div>
+          <textarea id="linkText" rows="7" spellcheck="false" placeholder="https://civitai.com/models/12345?modelVersionId=67890&#10;loras https://huggingface.co/org/repo/resolve/main/file.safetensors&#10;&#10;One link per line. Put a folder name first to choose where it goes."></textarea>
+          <div class="row">
+            <button class="btn primary" id="queueLinks">Download</button>
+            <button class="btn ghost" id="loadExtras" title="Extra Krea 2 image LoRAs — realism, styles and sliders. Nothing adult.">Load extra image LoRAs</button>
+            <button class="btn ghost" id="loadNsfw" title="Adds the curated adult model list to the box">Load NSFW kit (18+)</button>
+          </div>
+          <p class="msg" id="linkMsg" role="status"></p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Downloads</h2><span class="hint" id="jobsHint"></span></div>
+          <div id="jobs"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- OUTPUTS -->
+  <section class="tab" id="tab-outputs" hidden>
+    <div class="section-title">
+      <h1>Outputs</h1>
+      <p class="sub" id="outputsSub">Everything ComfyUI saved. Pick files, or take them all, as ZIP.</p>
+    </div>
+    <div class="toolbar card">
+      <div class="seg" id="kindFilter">
+        <button data-kind="all" aria-pressed="true">All</button>
+        <button data-kind="video">Video</button>
+        <button data-kind="image">Image</button>
+        <button data-kind="audio">Audio</button>
+      </div>
+      <button class="btn ghost" id="selectNew" title="Files saved after the newest file in your last ZIP from this browser">New since last ZIP</button>
+      <button class="btn ghost" id="selectAll">Select all</button>
+      <button class="btn ghost" id="selectNone">Clear</button>
+      <span class="sel mono" id="selInfo">0 selected</span>
+      <span class="spacer"></span>
+      <label class="split">Split
+        <select id="partSize">
+          <option value="0">one ZIP</option>
+          <option value="1">per 1 GB</option>
+          <option value="2" selected>per 2 GB</option>
+          <option value="4">per 4 GB</option>
+          <option value="count50">per 50 files</option>
+          <option value="count100">per 100 files</option>
+        </select>
+      </label>
+      <button class="btn primary" id="zipSelected">Download ZIP</button>
+      <button class="btn danger" id="deleteSelected">Delete</button>
+    </div>
+    <div class="confirm card" id="deleteConfirm" hidden>
+      <b id="deleteAsk">Delete these files?</b>
+      <span class="small dim">They are removed from the pod for good — download the ZIP first if
+        you want to keep them.</span>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="deleteCancel">Cancel</button>
+      <button class="btn danger" id="deleteGo">Yes, delete</button>
+    </div>
+    <div class="parts" id="parts" hidden></div>
+    <div class="gallery" id="gallery"></div>
+  </section>
+
+  <!-- KEYS -->
+  <section class="tab" id="tab-keys" hidden>
+    <div class="section-title">
+      <h1>API keys</h1>
+      <p class="sub">Saved on your own volume (<span class="mono">/workspace/aiangel/.secrets</span>), used only for downloads, shown masked. ComfyUI's Model list and Model Manager use the same keys.</p>
+    </div>
+    <div class="grid two">
+      <div class="card key-card" data-site="civitai">
+        <div class="card-head"><h2>Civitai</h2><span class="state-pill" data-for="civitai"></span></div>
+        <p class="small dim">Needed for every Civitai download. Civitai → Account settings → API Keys.</p>
+        <input type="password" autocomplete="off" spellcheck="false" placeholder="Paste Civitai API key">
+        <div class="row"><button class="btn primary save-key">Save</button><button class="btn ghost clear-key">Remove</button></div>
+      </div>
+      <div class="card key-card" data-site="huggingface">
+        <div class="card-head"><h2>Hugging Face</h2><span class="state-pill" data-for="huggingface"></span></div>
+        <p class="small dim">Only for gated or private repos. huggingface.co → Settings → Access Tokens (read).</p>
+        <input type="password" autocomplete="off" spellcheck="false" placeholder="Paste Hugging Face token">
+        <div class="row"><button class="btn primary save-key">Save</button><button class="btn ghost clear-key">Remove</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LOGS -->
+  <section class="tab" id="tab-logs" hidden>
+    <div class="section-title row-between">
+      <h1>Logs</h1>
+      <div class="seg" id="logPick">
+        <button data-log="boot" aria-pressed="true">Boot</button>
+        <button data-log="models">Models</button>
+        <button data-log="comfyui">ComfyUI</button>
+      </div>
+    </div>
+    <pre class="log mono" id="logBox">Loading…</pre>
+  </section>
+
+  <footer class="foot small dim">
+    <p>AI Angel ComfyPod is a template that runs the prompts and pictures you give it. You are
+      responsible for what you make with it and how you use it; its authors accept no liability
+      for generated content.</p>
+  </footer>
+</main>
+
+<!-- Crop a pinned frame. The window IS the clip's shape, so what fills it is exactly what the
+     clip starts (or ends) on: drag the picture to move it, the slider zooms. -->
+<div class="sheet" id="cropSheet" hidden>
+  <div class="card crop-card" role="dialog" aria-modal="true" aria-labelledby="cropTitle">
+    <div class="card-head">
+      <h2 id="cropTitle">Crop this frame</h2>
+      <span class="hint mono" id="cropSize">9:16 · 576×1024</span>
+    </div>
+    <div class="crop-stage" id="cropStage">
+      <img id="cropImg" alt="" draggable="false">
+    </div>
+    <p class="small dim">Drag the picture to move it, and use the slider to zoom. Whatever fills
+      the box is what the clip starts on — the rest is cut away.</p>
+    <div class="row crop-row">
+      <input type="range" id="cropZoom" min="100" max="400" value="100" aria-label="Zoom">
+      <button class="btn ghost" id="cropReset" type="button">Fit</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="cropCancel" type="button">Cancel</button>
+      <button class="btn brand" id="cropSave" type="button">Use this crop</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="app.js"></script>
+<script src="shopee.js"></script>
+<script src="doodle.js"></script>
+<script src="i18n.js"></script>
+</body>
+</html>

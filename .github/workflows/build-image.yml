@@ -1,0 +1,50 @@
+name: Build RunPod image
+
+# ghcr.io/<owner>/<repo>:latest = the AI Angel ComfyPod image (BASE_IMAGE) with this repo's
+# dashboard files on top. crane appends one small layer to the base inside the registry, so the
+# runner never unpacks the ~5 GB base. No models are in the image: the pod downloads the presets
+# named in MODELS when it starts.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: imjasonh/setup-crane@v0.4
+
+      - name: Pack the dashboard files as one layer
+        run: |
+          mkdir -p layer/opt/aiangel/dashboard
+          cp -r dashboard/web layer/opt/aiangel/dashboard/web
+          find layer -type d -exec chmod 755 {} +
+          find layer -type f -exec chmod 644 {} +
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='2026-01-01 00:00Z' \
+            -C layer -cf web.tar opt
+          tar -tvf web.tar
+
+      - name: Append it to the base image and push
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          base="$(tr -d ' \r\n' < BASE_IMAGE)"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tag="${GITHUB_SHA::7}"
+          crane auth login ghcr.io -u "$GITHUB_ACTOR" -p "$TOKEN"
+          crane append -b "$base" -f web.tar -t "$image:$tag"
+          # the source label links the package to this repo on GitHub
+          crane mutate "$image:$tag" -t "$image:$tag" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.description=AI Angel ComfyPod with the Shopee affiliate tab" \
+            --label "org.opencontainers.image.base.name=$base"
+          crane tag "$image:$tag" latest
+          crane config "$image:latest" | python3 -c "import json,sys; c=json.load(sys.stdin)['config']; print('Entrypoint', c.get('Entrypoint'), 'Ports', list(c.get('ExposedPorts', {})))"
+          echo "### Pushed \`$image:latest\` (also \`:$tag\`)" >> "$GITHUB_STEP_SUMMARY"
