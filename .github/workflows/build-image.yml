@@ -40,11 +40,14 @@ jobs:
           tag="${GITHUB_SHA::7}"
           crane auth login ghcr.io -u "$GITHUB_ACTOR" -p "$TOKEN"
           crane append -b "$base" -f web.tar -t "$image:$tag"
-          # the source label links the package to this repo on GitHub
+          # MODELS defaults to what the Shopee tab uses, so a pod started without the template's
+          # variable still downloads it; the template's own MODELS overrides this. The source
+          # label links the package to this repo on GitHub.
           crane mutate "$image:$tag" -t "$image:$tag" \
+            --env "MODELS=$(tr -d ' \r\n' < MODELS)" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.description=AI Angel ComfyPod with the Shopee affiliate tab" \
+            --label "org.opencontainers.image.description=Shopee ComfyPod: AI Angel ComfyPod with the Shopee affiliate tab" \
             --label "org.opencontainers.image.base.name=$base"
           crane tag "$image:$tag" latest
-          crane config "$image:latest" | python3 -c "import json,sys; c=json.load(sys.stdin)['config']; print('Entrypoint', c.get('Entrypoint'), 'Ports', list(c.get('ExposedPorts', {})))"
+          crane config "$image:latest" | python3 -c "import json,sys; c=json.load(sys.stdin)['config']; print('Entrypoint', c.get('Entrypoint'), 'Ports', list(c.get('ExposedPorts', {})), [e for e in c.get('Env', []) if e.startswith('MODELS=')])"
           echo "### Pushed \`$image:latest\` (also \`:$tag\`)" >> "$GITHUB_STEP_SUMMARY"
