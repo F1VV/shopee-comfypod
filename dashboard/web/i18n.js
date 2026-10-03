@@ -361,6 +361,7 @@
     "Import story": "นำเข้าเรื่อง",
     "Export story": "ส่งออกเรื่อง",
     "Stop waiting": "หยุดรอ",
+    "Packing the story…": "กำลังรวมไฟล์เรื่อง…",
     "Uploading the pictures…": "กำลังอัปโหลดรูป…",
     "Stopped waiting. Make all scenes queues them when you are ready.": "หยุดรอแล้ว กด ทำทั้งหมด เมื่อพร้อมเพื่อเข้าคิว",
 
@@ -563,8 +564,9 @@
     [/^The shots now add up to ([\d.]+) s\.$/, "ตอนนี้ช็อตรวมกันได้ $1 วินาที"],
     [/^Scene (\d+): (.+)$/, "ฉาก $1: $2"],
     // Story tab: export / import
-    [/^Saved (.+\.story\.json)\. On the pod, open the Story tab and import it\.$/, "บันทึก $1 แล้ว เปิดแท็บเล่าเรื่องบน pod แล้วนำเข้าไฟล์นี้"],
-    [/^Saved (.+\.story\.json) without the blocking video of scene ([\d, ]+): this page no longer has it\. Add it again and export to include it\.$/, "บันทึก $1 แล้ว แต่ไม่มีวิดีโอ blocking ของฉาก $2 เพราะหน้านี้ไม่มีไฟล์แล้ว เพิ่มวิดีโอใหม่แล้วส่งออกอีกครั้ง"],
+    [/^(.+) could not be read: (.+)$/, "อ่าน $1 ไม่ได้: $2"],
+    [/^Saved (.+\.story\.zip)\. On the pod, open the Story tab and import it\.$/, "บันทึก $1 แล้ว เปิดแท็บเล่าเรื่องบน pod แล้วนำเข้าไฟล์นี้"],
+    [/^Saved (.+\.story\.zip) without the blocking video of scene ([\d, ]+): this page no longer has it\. Add it again and export to include it\.$/, "บันทึก $1 แล้ว แต่ไม่มีวิดีโอ blocking ของฉาก $2 เพราะหน้านี้ไม่มีไฟล์แล้ว เพิ่มวิดีโอใหม่แล้วส่งออกอีกครั้ง"],
     [/^Uploading the blocking video of scene (\d+)…$/, "กำลังอัปโหลดวิดีโอ blocking ของฉาก $1…"],
     [/^Imported (.+): (\d+) scenes?\.$/, "นำเข้า $1 แล้ว: $2 ฉาก"],
     [/^(.+) is not a story file exported from this tab\.$/, "$1 ไม่ใช่ไฟล์เรื่องที่ส่งออกจากแท็บนี้"],

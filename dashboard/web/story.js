@@ -10,7 +10,8 @@
    The H3 prompt is written here in the browser (the same document shape prompt_build.py makes)
    and sent as a free prompt to beginner/start, with the pictures in `refs` and the blocking video
    in `ref_videos` (backend/ in this repo patches server.py and h3_workflows.py for that). The clip
-   lands in the shared Queue and in Outputs like any other.
+   lands in the shared Queue and in Outputs like any other. Export story packs it all into one
+   .story.zip for the pod.
 
    The story is kept in this browser's localStorage, pictures included (scaled down), so it
    outlives a terminated pod: a picture is uploaded again the first time it is used on another
@@ -111,6 +112,9 @@
 
   // blob URLs of the blocking videos picked in this page session, by filename on the pod
   const videoUrls = new Map();
+  // the photos as they were picked in this page session (full size), by filename on the pod, so
+  // an exported story carries them rather than the 1024 px copy kept in localStorage
+  const originals = new Map();
   const pod = () => ($("#podId")?.textContent || "").trim();
 
   /* ---------------- pictures and videos ---------------- */
@@ -154,6 +158,7 @@
     const url = URL.createObjectURL(f);
     try {
       const [file, thumb] = await Promise.all([upload(f), shrink(url, 1024)]);
+      originals.set(file, f);
       return { file, thumb, pod: pod() };
     } finally {
       URL.revokeObjectURL(url);
@@ -765,36 +770,143 @@ s.render.filepath = "//blocking_scene${n}_"
   }
 
   /* ---------------- export / import ----------------
-     One file carries a whole story to another browser or pod: the words, the settings, the
-     pictures (already small JPEG data URLs) and every blocking video still held by this page.
-     Written on a PC in demo mode, imported on the pod, queued in one go. */
+     One .story.zip carries a whole story to another browser or pod, written on a PC in demo mode
+     and imported on the pod:
+
+       story.json        the words and settings; pictures and videos are named by their path here
+       photos/…          each character's photo and the place, at full size when this page still
+                         has the original, otherwise the 1024 px copy the story keeps
+       videos/…          each blocking video this page still has
+       prompts/…         what H3 is sent for each scene, to read (import ignores it)
+
+     The zip is written uncompressed (photos and videos are compressed already) by the few lines
+     below, so nothing is loaded from outside. Import reads stored and deflated entries, so a zip
+     that was unpacked, edited and zipped again by Windows still loads. The older .story.json
+     (everything inline as data URLs) still imports. */
   const FILE_FORMAT = "aiangel-story";
   const VIDEO_EXT = /\.(mp4|mov|webm|mkv)$/i;  // server.py ALLOWED_VIDEO_EXT
+  const IMAGE_EXT = /\.(png|jpe?g|webp)$/i;    // server.py ALLOWED_REF_EXT
 
-  const toDataUrl = (blob) => new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = () => reject(new Error("could not read the video"));
-    r.readAsDataURL(blob);
-  });
+  const CRC = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  const crc32 = (u8) => {
+    let c = 0xffffffff;
+    for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+
+  // [{name, data: Uint8Array}] -> a zip Blob, every entry stored
+  function zipFiles(files) {
+    const enc = new TextEncoder(), now = new Date();
+    const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+    const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+    const body = [], central = [];
+    let offset = 0;
+    for (const f of files) {
+      const name = enc.encode(f.name), crc = crc32(f.data), size = f.data.length;
+      const local = new DataView(new ArrayBuffer(30));
+      [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, time, 2], [12, date, 2],
+        [14, crc, 4], [18, size, 4], [22, size, 4], [26, name.length, 2], [28, 0, 2]]
+        .forEach(([at, v, n]) => (n === 4 ? local.setUint32(at, v, true) : local.setUint16(at, v, true)));
+      body.push(local, name, f.data);
+      const dir = new DataView(new ArrayBuffer(46));
+      [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, time, 2],
+        [14, date, 2], [16, crc, 4], [20, size, 4], [24, size, 4], [28, name.length, 2], [42, offset, 4]]
+        .forEach(([at, v, n]) => (n === 4 ? dir.setUint32(at, v, true) : dir.setUint16(at, v, true)));
+      central.push(dir, name);
+      offset += 30 + name.length + size;
+    }
+    const size = central.reduce((n, part) => n + part.byteLength, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, files.length, true);
+    end.setUint16(10, files.length, true);
+    end.setUint32(12, size, true);
+    end.setUint32(16, offset, true);
+    return new Blob([...body, ...central, end], { type: "application/zip" });
+  }
+
+  // a zip Blob -> Map(path -> Uint8Array); folders are left out, paths use "/"
+  async function unzipFiles(blob) {
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    const dv = new DataView(buf.buffer);
+    let e = buf.length - 22;
+    while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+    if (e < 0) throw new Error("it is not a zip file");
+    const dec = new TextDecoder(), out = new Map();
+    let p = dv.getUint32(e + 16, true);
+    for (let i = dv.getUint16(e + 10, true); i > 0; i--) {
+      if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("the zip file is damaged");
+      const method = dv.getUint16(p + 10, true), packed = dv.getUint32(p + 20, true);
+      const nlen = dv.getUint16(p + 28, true), skip = dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+      const name = dec.decode(buf.subarray(p + 46, p + 46 + nlen)).replace(/\\/g, "/");
+      const local = dv.getUint32(p + 42, true);
+      const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+      let data = buf.subarray(start, start + packed);
+      if (method === 8) {
+        data = new Uint8Array(await new Response(new Blob([data]).stream()
+          .pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+      } else if (method !== 0) {
+        throw new Error(`${name} is packed in a way this page cannot read; zip it again`);
+      }
+      if (!name.endsWith("/")) out.set(name, data);
+      p += 46 + nlen + skip;
+    }
+    return out;
+  }
+
+  const bytes = async (src) => new Uint8Array(await (await fetch(src)).arrayBuffer());
+  // a file name that survives any unzip tool: Latin letters and digits, or the fallback
+  const safeName = (text, fallback) =>
+    (text || "").normalize("NFKD").replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || fallback;
 
   async function exportStory() {
-    const videos = {}, missing = [];
-    for (const [i, sc] of S.scenes.entries()) {
-      const url = sc.blocking?.file && videoUrls.get(sc.blocking.file);
-      if (url) videos[sc.id] = await toDataUrl(await (await fetch(url)).blob());
-      else if (sc.blocking) missing.push(i + 1);
-    }
+    msg("Packing the story…");
+    const files = [], missing = [], taken = new Set();
+    const add = (path, data) => {
+      let name = path, n = 2;
+      while (taken.has(name)) name = path.replace(/(\.\w+)?$/, `-${n++}$1`);
+      taken.add(name);
+      files.push({ name, data });
+      return name;
+    };
     // file names only mean something on the pod they were uploaded to, so none travel
     const story = JSON.parse(JSON.stringify(S));
-    for (const x of [story.place, ...story.cast]) if (x) Object.assign(x, { file: null, pod: null });
-    for (const sc of story.scenes) {
+    const photo = async (x, saved, base) => {
+      if (!x) return;
+      const original = saved.file && originals.get(saved.file);
+      const ext = original ? (/\.\w+$/.exec(original.name)?.[0] || ".jpg").toLowerCase() : ".jpg";
+      if (original || saved.thumb) {
+        x.photo = add(`photos/${base}${ext}`, original ? new Uint8Array(await original.arrayBuffer()) : await bytes(saved.thumb));
+      }
+      Object.assign(x, { file: null, pod: null, thumb: null });
+    };
+    for (const [i, c] of story.cast.entries()) await photo(c, S.cast[i], safeName(c.name, `character-${i + 1}`));
+    await photo(story.place, S.place || {}, "place");
+    for (const [i, sc] of story.scenes.entries()) {
       delete sc.state;
-      if (sc.blocking) Object.assign(sc.blocking, { file: null, pod: null });
+      const blk = S.scenes[i].blocking, url = blk?.file && videoUrls.get(blk.file);
+      if (url) {
+        const ext = (VIDEO_EXT.exec(blk.name || "")?.[0] || ".mp4").toLowerCase();
+        sc.blocking.video = add(`videos/scene-${i + 1}-${safeName((blk.name || "").replace(VIDEO_EXT, ""), "blocking")}${ext}`, await bytes(url));
+        Object.assign(sc.blocking, { file: null, pod: null });
+      } else if (sc.blocking) {
+        missing.push(i + 1);
+        sc.blocking = null;
+      }
+      add(`prompts/scene-${i + 1}.txt`, new TextEncoder().encode(buildPrompt(S.scenes[i])));
     }
-    const data = { format: FILE_FORMAT, version: 1, saved: new Date().toISOString(), story, videos };
-    const name = `${S.title.trim().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "") || "story"}.story.json`;
-    const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" })), download: name });
+    const enc = new TextEncoder();
+    files.unshift({ name: "story.json", data: enc.encode(JSON.stringify({ format: FILE_FORMAT, version: 2, saved: new Date().toISOString(), story }, null, 1)) });
+    const name = `${safeName(S.title, "story")}.story.zip`;
+    const a = el("a", { href: URL.createObjectURL(zipFiles(files)), download: name });
     document.body.append(a);
     a.click();
     a.remove();
@@ -804,40 +916,89 @@ s.render.filepath = "//blocking_scene${n}_"
       : `Saved ${name}. On the pod, open the Story tab and import it.`);
   }
 
+  // what a story file holds, either shape: {story, photo(path), video(path)} with Blobs
+  async function readStoryFile(f) {
+    if (/\.zip$/i.test(f.name)) {
+      const entries = await unzipFiles(f);
+      // a zip made from the unpacked folder has that folder in front of every path
+      const json = [...entries.keys()].find((k) => /(^|\/)story\.json$/.test(k));
+      if (!json) throw new Error("it has no story.json inside");
+      const root = json.slice(0, -"story.json".length);
+      const data = JSON.parse(new TextDecoder().decode(entries.get(json)));
+      const blob = (path, type) => {
+        const d = path && entries.get(root + path);
+        return d ? new Blob([d], { type }) : null;
+      };
+      return {
+        data,
+        photo: (x) => blob(x?.photo, /\.png$/i.test(x?.photo || "") ? "image/png" : /\.webp$/i.test(x?.photo || "") ? "image/webp" : "image/jpeg"),
+        video: (sc) => blob(sc.blocking?.video, /\.webm$/i.test(sc.blocking?.video || "") ? "video/webm" : "video/mp4"),
+      };
+    }
+    const data = JSON.parse(await f.text());
+    const inline = async (src) => (src ? (await fetch(src)).blob() : null);
+    return { data, photo: (x) => inline(x?.thumb), video: (sc) => inline(data.videos?.[sc.id]) };
+  }
+
   async function importStory(f) {
-    let data;
-    try { data = JSON.parse(await f.text()); } catch { data = null; }
-    if (data?.format !== FILE_FORMAT || !Array.isArray(data.story?.scenes)) {
+    let pack;
+    try {
+      pack = await readStoryFile(f);
+    } catch (e) {
+      return msg(`${f.name} could not be read: ${e.message}`);
+    }
+    const st = pack.data?.story;
+    if (pack.data?.format !== FILE_FORMAT || !Array.isArray(st?.scenes)) {
       return msg(`${f.name} is not a story file exported from this tab.`);
     }
     const busy = S.scenes.some((sc) => sc.shots.some((s) => s.what.trim()));
     if (busy && !confirm(`Replace the story in this tab with ${f.name}?`)) return;
     stopWaiting();
-    const videos = data.videos || {};
-    S = Object.assign(blank(), data.story, { at: 0 });
-    for (const x of [S.place, ...S.cast]) if (x) { Object.assign(x, { file: null, pod: null }); delete x.busy; }
+
+    // the media first, while the story is still the file's own objects
+    const problems = [];
+    const photos = new Map(), videos = new Map();
+    for (const x of [st.place, ...(st.cast || [])]) if (x) photos.set(x, await pack.photo(x));
+    for (const sc of st.scenes) if (sc.blocking) videos.set(sc, await pack.video(sc));
+
+    S = Object.assign(blank(), st, { at: 0 });
+    for (const x of [S.place, ...S.cast]) {
+      if (!x) continue;
+      const blob = photos.get(x);
+      Object.assign(x, { file: null, pod: null, thumb: null });
+      delete x.busy;
+      delete x.photo;
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        try { x.thumb = await shrink(url, 1024); } catch { problems.push(`${x.name || "the place"}: the photo cannot be read`); }
+        URL.revokeObjectURL(url);
+        x.blob = blob;
+      }
+    }
     if (S.place && !S.place.thumb) S.place = null;
     for (const sc of S.scenes) {
       delete sc.state;
-      if (sc.blocking && videos[sc.id]) Object.assign(sc.blocking, { file: null, pod: null, busy: true });
+      const blob = sc.blocking && videos.get(sc);
+      if (blob) Object.assign(sc.blocking, { file: null, pod: null, busy: true, blob });
       else sc.blocking = null;
+      if (sc.blocking) delete sc.blocking.video;
     }
     if (!S.scenes.length) S.scenes = [newScene(1)];
     drawAll();
-    save();
 
     // everything goes up to this pod now, so queueing does not wait on uploads
-    const problems = [];
     for (const [i, sc] of S.scenes.entries()) {
-      if (!sc.blocking) continue;
+      const blk = sc.blocking;
+      if (!blk) continue;
+      const blob = blk.blob;
+      delete blk.blob;
       msg(`Uploading the blocking video of scene ${i + 1}…`);
       try {
-        const blob = await (await fetch(videos[sc.id])).blob();
-        const name = VIDEO_EXT.test(sc.blocking.name || "") ? sc.blocking.name : `scene${i + 1}.mp4`;
+        const name = VIDEO_EXT.test(blk.name || "") ? blk.name : `scene${i + 1}.mp4`;
         const file = await upload(new File([blob], name, { type: blob.type || "video/mp4" }));
         videoUrls.set(file, URL.createObjectURL(blob));
-        Object.assign(sc.blocking, { file, pod: pod() });
-        delete sc.blocking.busy;
+        Object.assign(blk, { file, pod: pod() });
+        delete blk.busy;
       } catch (e) {
         sc.blocking = null;
         for (const s of sc.shots) if (s.move === "blocking") s.move = "static";
@@ -849,8 +1010,20 @@ s.render.filepath = "//blocking_scene${n}_"
       if (sc === scene()) drawScene();
     }
     msg("Uploading the pictures…");
-    for (const item of refsFor().files) {
-      try { await onPod(item, item === S.place ? "place" : item.name || "character"); } catch (e) { problems.push(e.message); }
+    for (const x of [S.place, ...S.cast]) {
+      if (!x?.blob) continue;
+      const blob = x.blob;
+      delete x.blob;
+      try {
+        const type = blob.type || "image/jpeg";
+        const name = `${safeName(x.name, "picture")}.${type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg"}`;
+        const original = new File([blob], name, { type });
+        x.file = await upload(original);
+        x.pod = pod();
+        originals.set(x.file, original);
+      } catch (e) {
+        problems.push(`${x.name || "the place"}: ${e.message}`);
+      }
     }
     drawAll();
     save();
@@ -1010,7 +1183,7 @@ s.render.filepath = "//blocking_scene${n}_"
     const f = e.dataTransfer.files[0];
     if (!f) return;
     e.preventDefault();
-    if (/\.json$/i.test(f.name)) importStory(f);
+    if (/\.(zip|json)$/i.test(f.name)) importStory(f);
     else if (f.type.startsWith("video/")) setBlocking(f);
     else toast("Drop a story file or a blocking video here; photos go on a character or the place", true);
   });
