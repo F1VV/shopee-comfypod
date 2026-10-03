@@ -357,6 +357,13 @@
     "This pod's image cannot take a video yet: start the pod from the latest Shopee ComfyPod image.": "อิมเมจของ pod นี้ยังรับวิดีโอไม่ได้ ให้เปิด pod จากอิมเมจ Shopee ComfyPod ล่าสุด",
     "Some of its pictures are not on this pod: add them again.": "รูปบางรูปไม่มีใน pod นี้ เพิ่มใหม่อีกครั้ง",
 
+    // Story tab: export / import
+    "Import story": "นำเข้าเรื่อง",
+    "Export story": "ส่งออกเรื่อง",
+    "Stop waiting": "หยุดรอ",
+    "Uploading the pictures…": "กำลังอัปโหลดรูป…",
+    "Stopped waiting. Make all scenes queues them when you are ready.": "หยุดรอแล้ว กด ทำทั้งหมด เมื่อพร้อมเพื่อเข้าคิว",
+
     // Shopee affiliate tab (shopee.js, added for this workspace)
     "Shopee affiliate": "คลิป Shopee Affiliate",
     "Product photos and a few words in, a vertical clip out: a hook, the product working, and a call to the basket, spoken in Thai.":
@@ -555,6 +562,13 @@
     [/^the blocking video is ([\d.]+) s$/, "วิดีโอ blocking ยาว $1 วินาที"],
     [/^The shots now add up to ([\d.]+) s\.$/, "ตอนนี้ช็อตรวมกันได้ $1 วินาที"],
     [/^Scene (\d+): (.+)$/, "ฉาก $1: $2"],
+    // Story tab: export / import
+    [/^Saved (.+\.story\.json)\. On the pod, open the Story tab and import it\.$/, "บันทึก $1 แล้ว เปิดแท็บเล่าเรื่องบน pod แล้วนำเข้าไฟล์นี้"],
+    [/^Saved (.+\.story\.json) without the blocking video of scene ([\d, ]+): this page no longer has it\. Add it again and export to include it\.$/, "บันทึก $1 แล้ว แต่ไม่มีวิดีโอ blocking ของฉาก $2 เพราะหน้านี้ไม่มีไฟล์แล้ว เพิ่มวิดีโอใหม่แล้วส่งออกอีกครั้ง"],
+    [/^Uploading the blocking video of scene (\d+)…$/, "กำลังอัปโหลดวิดีโอ blocking ของฉาก $1…"],
+    [/^Imported (.+): (\d+) scenes?\.$/, "นำเข้า $1 แล้ว: $2 ฉาก"],
+    [/^(.+) is not a story file exported from this tab\.$/, "$1 ไม่ใช่ไฟล์เรื่องที่ส่งออกจากแท็บนี้"],
+    [/^(?:(\d+) queued\. )?Waiting for the pod: (.+)\. (\d+) scenes? will queue by themselves when it is ready; keep this tab open\.$/, "กำลังรอ pod: $2 อีก $3 ฉากจะเข้าคิวเองเมื่อพร้อม อย่าปิดแท็บนี้"],
   ];
 
   const PH = {  // placeholders

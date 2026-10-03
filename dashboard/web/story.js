@@ -686,18 +686,42 @@ s.render.filepath = "//blocking_scene${n}_"
     };
   }
 
+  // What server.py says while the pod is still starting or downloading the clip models. Those are
+  // the only refusals that fix themselves, so only they are retried.
+  const NOT_READY = /ComfyUI is not up yet|models not downloaded yet/;
+  const RETRY_MS = 20000;
+  let waitTimer = null;
+  const stopWaiting = () => { clearTimeout(waitTimer); waitTimer = null; };
+
+  // the scenes still to queue are sent by themselves once the pod is ready, so a story imported
+  // during the first boot's downloads starts the moment it can
+  function waitFor(rest, why, queued) {
+    const n = rest.length;
+    // by id, not position: a scene added or deleted meanwhile must not shift which ones go
+    const ids = rest.map((i) => S.scenes[i].id);
+    $("#stMsg").replaceChildren(
+      `${queued ? `${queued} queued. ` : ""}Waiting for the pod: ${why}. ${n} scene${n === 1 ? "" : "s"} will queue by themselves when it is ready; keep this tab open. `,
+      el("button", { class: "link", type: "button", onclick: () => {
+        stopWaiting();
+        msg("Stopped waiting. Make all scenes queues them when you are ready.");
+      } }, "Stop waiting"));
+    waitTimer = setTimeout(() => makeScenes(ids.map((id) => S.scenes.findIndex((sc) => sc.id === id)).filter((i) => i >= 0)), RETRY_MS);
+  }
+
   async function makeScenes(indexes) {
+    stopWaiting();
     $("#stStart").disabled = $("#stAll").disabled = true;
     msg("");
     let queued = 0;
     try {
-      for (const i of indexes) {
+      for (const [pos, i] of indexes.entries()) {
         const sc = S.scenes[i];
         try {
           const r = await api("beginner/start", await requestFor(sc, i));
           queued += r.jobs?.length || S.takes;
           sc.state = "queued";
         } catch (e) {
+          if (NOT_READY.test(e.message)) return waitFor(indexes.slice(pos), e.message, queued);
           sc.state = "failed";
           throw new Error(`Scene ${i + 1}: ${e.message}`);
         } finally {
@@ -738,6 +762,103 @@ s.render.filepath = "//blocking_scene${n}_"
     msg(r.missing_refs?.length
       ? "Some of its pictures are not on this pod: add them again."
       : `Scene ${S.at + 1} of the story this clip was made from is back.`);
+  }
+
+  /* ---------------- export / import ----------------
+     One file carries a whole story to another browser or pod: the words, the settings, the
+     pictures (already small JPEG data URLs) and every blocking video still held by this page.
+     Written on a PC in demo mode, imported on the pod, queued in one go. */
+  const FILE_FORMAT = "aiangel-story";
+  const VIDEO_EXT = /\.(mp4|mov|webm|mkv)$/i;  // server.py ALLOWED_VIDEO_EXT
+
+  const toDataUrl = (blob) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error("could not read the video"));
+    r.readAsDataURL(blob);
+  });
+
+  async function exportStory() {
+    const videos = {}, missing = [];
+    for (const [i, sc] of S.scenes.entries()) {
+      const url = sc.blocking?.file && videoUrls.get(sc.blocking.file);
+      if (url) videos[sc.id] = await toDataUrl(await (await fetch(url)).blob());
+      else if (sc.blocking) missing.push(i + 1);
+    }
+    // file names only mean something on the pod they were uploaded to, so none travel
+    const story = JSON.parse(JSON.stringify(S));
+    for (const x of [story.place, ...story.cast]) if (x) Object.assign(x, { file: null, pod: null });
+    for (const sc of story.scenes) {
+      delete sc.state;
+      if (sc.blocking) Object.assign(sc.blocking, { file: null, pod: null });
+    }
+    const data = { format: FILE_FORMAT, version: 1, saved: new Date().toISOString(), story, videos };
+    const name = `${S.title.trim().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "") || "story"}.story.json`;
+    const a = el("a", { href: URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" })), download: name });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    msg(missing.length
+      ? `Saved ${name} without the blocking video of scene ${missing.join(", ")}: this page no longer has it. Add it again and export to include it.`
+      : `Saved ${name}. On the pod, open the Story tab and import it.`);
+  }
+
+  async function importStory(f) {
+    let data;
+    try { data = JSON.parse(await f.text()); } catch { data = null; }
+    if (data?.format !== FILE_FORMAT || !Array.isArray(data.story?.scenes)) {
+      return msg(`${f.name} is not a story file exported from this tab.`);
+    }
+    const busy = S.scenes.some((sc) => sc.shots.some((s) => s.what.trim()));
+    if (busy && !confirm(`Replace the story in this tab with ${f.name}?`)) return;
+    stopWaiting();
+    const videos = data.videos || {};
+    S = Object.assign(blank(), data.story, { at: 0 });
+    for (const x of [S.place, ...S.cast]) if (x) { Object.assign(x, { file: null, pod: null }); delete x.busy; }
+    if (S.place && !S.place.thumb) S.place = null;
+    for (const sc of S.scenes) {
+      delete sc.state;
+      if (sc.blocking && videos[sc.id]) Object.assign(sc.blocking, { file: null, pod: null, busy: true });
+      else sc.blocking = null;
+    }
+    if (!S.scenes.length) S.scenes = [newScene(1)];
+    drawAll();
+    save();
+
+    // everything goes up to this pod now, so queueing does not wait on uploads
+    const problems = [];
+    for (const [i, sc] of S.scenes.entries()) {
+      if (!sc.blocking) continue;
+      msg(`Uploading the blocking video of scene ${i + 1}…`);
+      try {
+        const blob = await (await fetch(videos[sc.id])).blob();
+        const name = VIDEO_EXT.test(sc.blocking.name || "") ? sc.blocking.name : `scene${i + 1}.mp4`;
+        const file = await upload(new File([blob], name, { type: blob.type || "video/mp4" }));
+        videoUrls.set(file, URL.createObjectURL(blob));
+        Object.assign(sc.blocking, { file, pod: pod() });
+        delete sc.blocking.busy;
+      } catch (e) {
+        sc.blocking = null;
+        for (const s of sc.shots) if (s.move === "blocking") s.move = "static";
+        problems.push(/unsupported file type/.test(e.message)
+          ? `scene ${i + 1}: this pod's image cannot take a video yet`
+          : `scene ${i + 1}: ${e.message}`);
+      }
+      drawScenes();
+      if (sc === scene()) drawScene();
+    }
+    msg("Uploading the pictures…");
+    for (const item of refsFor().files) {
+      try { await onPod(item, item === S.place ? "place" : item.name || "character"); } catch (e) { problems.push(e.message); }
+    }
+    drawAll();
+    save();
+    const n = S.scenes.length;
+    msg(`Imported ${f.name}: ${n} scene${n === 1 ? "" : "s"}.${problems.length ? ` Not loaded: ${problems.join("; ")}.` : ""}`);
+    if (!DEMO && confirm(`Queue all ${n} scene${n === 1 ? "" : "s"} now${S.takes > 1 ? `, ${S.takes} takes each` : ""}? If the pod is still starting, they queue by themselves when it is ready.`)) {
+      makeScenes(S.scenes.map((_, i) => i));
+    }
   }
 
   /* ---------------- wiring ---------------- */
@@ -874,15 +995,24 @@ s.render.filepath = "//blocking_scene${n}_"
     if (e.target.open) $("#stBlenderCode").textContent = blenderScript();
   });
 
-  // a video dropped anywhere on the form is the current scene's blocking render
+  $("#stExport").addEventListener("click", () => exportStory().catch((e) => msg(e.message)));
+  $("#stImport").addEventListener("click", () => $("#stImportFile").click());
+  $("#stImportFile").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (f) importStory(f);
+  });
+
+  // dropped on the form: a story file is imported, a video is this scene's blocking render
   const card = $("#stCard");
   card.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); });
   card.addEventListener("drop", (e) => {
     const f = e.dataTransfer.files[0];
     if (!f) return;
     e.preventDefault();
-    if (f.type.startsWith("video/")) setBlocking(f);
-    else toast("Drop a video for the blocking render; photos go on a character or the place", true);
+    if (/\.json$/i.test(f.name)) importStory(f);
+    else if (f.type.startsWith("video/")) setBlocking(f);
+    else toast("Drop a story file or a blocking video here; photos go on a character or the place", true);
   });
 
   $("#stStart").addEventListener("click", () => makeScenes([S.at]));
@@ -893,12 +1023,13 @@ s.render.filepath = "//blocking_scene${n}_"
   $("#stCopyPrompt").addEventListener("click", () => copy(buildPrompt(), "Prompt"));
   $("#stNew").addEventListener("click", () => {
     if (!confirm("Start a new story? This one is cleared; saved characters stay.")) return;
+    stopWaiting();
     S = blank();
     drawAll();
     save();
     msg("");
   });
 
-  window.StoryTab = { shown: drawAll, loadRecipe };
+  window.StoryTab = { shown: drawAll, loadRecipe, importStory };
   drawAll();
 })();

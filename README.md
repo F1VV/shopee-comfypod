@@ -95,6 +95,25 @@ Open **Connect → 8189** for the dashboard. It shows the boot and the model dow
 is the third tab and **Story** the fourth. When you are done, download your clips, then **Stop** and
 **Terminate**.
 
+## Story tab: write on your PC, run on the pod
+
+A story is kept in the browser of the address it was made on, so the PC and the pod do not share
+it. To prepare everything before the pod is up:
+
+1. On your PC, serve `dashboard/web/` and open `index.html?demo#story`:
+   `python -m http.server 8765` in that folder, then http://127.0.0.1:8765/index.html?demo#story.
+   Demo mode runs no models, but every field, photo and blocking video works.
+2. Write the story: characters, scenes, shots, dialogue, blocking videos, takes, 720p/Fast.
+3. **Export story** saves one `<title>.story.json`: all the text and settings, the photos, and
+   each blocking video added in that browser session.
+4. On the pod, open the Story tab and **Import story** (or drop the file on the form). The photos
+   and videos upload, and it asks to queue every scene.
+5. If the pod is still booting or downloading models, the tab waits and queues the scenes by itself
+   as soon as the pod accepts them (it retries every 20 s). Keep the tab open; **Stop waiting**
+   cancels.
+
+Scenes run in the Queue one after another, each with its takes.
+
 ## Story tab: blocking videos from Blender
 
 1. Block the scene with simple shapes or mannequins, give each character its own colour, and

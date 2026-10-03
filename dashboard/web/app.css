@@ -771,6 +771,7 @@ select { width: auto; padding: 7px 10px; font-family: var(--sans); }
 .st-shot-acts { margin: 0; }
 #stLook { flex-wrap: wrap; }
 #stAll { white-space: nowrap; }
+.st-file-links { gap: 14px; margin: 0; }
 
 @media (max-width: 640px) {
   .st-member { flex-wrap: wrap; }

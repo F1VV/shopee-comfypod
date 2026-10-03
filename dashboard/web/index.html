@@ -598,7 +598,12 @@
             <em class="hint">each take is a new seed</em>
           </div>
           <span class="spacer"></span>
-          <button class="link" id="stNew" type="button">New story</button>
+          <span class="row tight st-file-links">
+            <button class="link" id="stImport" type="button" title="Load a .story.json file exported from this tab">Import story</button>
+            <button class="link" id="stExport" type="button" title="Save the whole story, photos and blocking videos included, as one file">Export story</button>
+            <button class="link" id="stNew" type="button">New story</button>
+            <input id="stImportFile" type="file" accept=".json,application/json" hidden>
+          </span>
         </div>
 
         <section class="step">
