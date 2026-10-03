@@ -73,6 +73,8 @@
     id: uid(), title: `Scene ${n}`, where: "", when: "", sound: "",
     shots: [newShot(3), newShot(3)],
     blocking: null,  // {file, pod, name, duration, width, height, follow}
+    // pictures the clip opens and ends exactly on; empty = H3 designs the shot from the text
+    frames: { start: null, end: null },  // each {file, pod, thumb, name, width, height}
   });
   const blank = () => ({
     title: "", logline: "", where: "", when: "", look: "film", lookText: "", aspect: "16:9",
@@ -89,11 +91,19 @@
     try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
   };
 
-  // what only lives while a picture or video is uploading
+  const FRAME_KEYS = ["start", "end"];
+  // every start and end frame of a story, for the loops that upload, export or import pictures
+  const frameItems = (st) => st.scenes.flatMap((sc) => FRAME_KEYS.map((k) => sc.frames?.[k])).filter(Boolean);
+
+  // what only lives while a picture or video is uploading; and frames for scenes made before them
   const settle = (st) => {
-    for (const x of [st.place, ...st.cast, ...st.scenes.map((sc) => sc.blocking)]) if (x) delete x.busy;
+    for (const sc of st.scenes) sc.frames = { start: sc.frames?.start || null, end: sc.frames?.end || null };
+    for (const x of [st.place, ...st.cast, ...frameItems(st), ...st.scenes.map((sc) => sc.blocking)]) if (x) delete x.busy;
     if (st.place && !st.place.thumb) st.place = null;
-    for (const sc of st.scenes) if (sc.blocking && !sc.blocking.file) sc.blocking = null;
+    for (const sc of st.scenes) {
+      if (sc.blocking && !sc.blocking.file) sc.blocking = null;
+      for (const k of FRAME_KEYS) if (sc.frames[k] && !sc.frames[k].thumb) sc.frames[k] = null;
+    }
     return st;
   };
 
@@ -261,13 +271,26 @@
     // the summary carries the story, so a scene is never shot without its context
     const first = sc.shots.find((s) => s.what.trim());
     const title = sc.title.trim() ? ` "${sc.title.trim()}"` : "";
+    const opens = !!sc.frames?.start, ends = !!sc.frames?.end;
+    const kind = anyRef ? "[reference generation]"
+      : opens && ends ? "[first and last frame to video]"
+        : opens ? "[first frame to video]" : ends ? "[keyframe to video]" : "[text to video]";
     const summary = [
-      `${anyRef ? "[reference generation]" : "[text to video]"} A ${/photoreal/i.test(look()) ? "photorealistic " : ""}${shape()} story scene${title}${where ? ` in ${where}` : ""}.`,
+      `${kind} A ${/photoreal/i.test(look()) ? "photorealistic " : ""}${shape()} story scene${title}${where ? ` in ${where}` : ""}.`,
       S.logline.trim() && `The story: ${end(S.logline.trim())}`,
       when && `It is ${when}.`,
       first && end(cap(mentions(first.what.trim()))),
     ].filter(Boolean).join(" ");
     parts.push("summary:", summary, "");
+
+    // The frames are not <Picture N>: H3 gets each picture as that frame itself, so the text only
+    // says what it means for the clip (prompt_build.py's keyframes block, word for word).
+    if (opens || ends) {
+      parts.push("keyframes:");
+      if (opens) parts.push("00:00.00: the clip opens exactly on the supplied first frame. Everything in it — faces, hair, clothing, the place and the light — continues unchanged from there.");
+      if (ends) parts.push(`${timecode(clipSeconds(sceneSeconds(sc) || 1))}: the clip ends exactly on the supplied last frame.`);
+      parts.push("");
+    }
 
     if (anyRef) {
       parts.push("retention_analysis:");
@@ -433,6 +456,62 @@
     }));
   }
 
+  // the clip's shape, as CSS: a frame is shown the way the pod will cut it (cover, centred)
+  const shapeRatio = () => ({ "9:16": "9 / 16", "16:9": "16 / 9", "1:1": "1 / 1" })[S.aspect];
+
+  function drawFrames() {
+    const sc = scene(), prev = S.scenes[S.at - 1];
+    const [w, h] = SHAPES[S.aspect];
+    const notes = [];
+    for (const key of FRAME_KEYS) {
+      const fr = sc.frames[key];
+      const label = key === "start" ? "First frame" : "Last frame";
+      const box = el("button", { class: "st-frame-box", type: "button", style: `aspect-ratio: ${shapeRatio()}`,
+        title: fr ? `${label} · click to change` : `Add the picture the clip ${key === "start" ? "opens" : "ends"} on`,
+        onclick: () => { frameKey = key; $("#stFrameFile").click(); } },
+      fr?.thumb ? el("img", { src: fr.thumb, alt: label }) : el("span", { class: "st-nopic", text: fr?.busy ? "uploading…" : "+ picture" }));
+      if (fr?.busy) box.classList.add("busy");
+      const acts = [];
+      if (fr) {
+        acts.push(el("button", { class: "x", type: "button", title: "Remove", onclick: () => {
+          sc.frames[key] = null; drawFrames(); changed();
+        } }, "×"));
+      }
+      // continuity: the next scene opens where this one ended
+      if (key === "start" && prev?.frames?.end && prev.frames.end.thumb !== fr?.thumb) {
+        acts.push(el("button", { class: "link", type: "button", title: "Start this scene exactly where the previous one ends",
+          onclick: () => { sc.frames.start = { ...prev.frames.end }; drawFrames(); changed(); } }, `Use scene ${S.at}'s last frame`));
+      }
+      $(key === "start" ? "#stFrameStart" : "#stFrameEnd").replaceChildren(
+        el("span", { class: "opt-k", text: label }), box, el("div", { class: "row tight st-frame-acts" }, ...acts));
+      if (fr?.width && Math.abs(fr.width / fr.height - w / h) > 0.02) {
+        notes.push(`The ${label.toLowerCase()} is ${fr.width}×${fr.height}; its edges outside ${S.aspect} are cut off, as shown.`);
+      }
+    }
+    $("#stFramesNote").textContent = notes.join(" ")
+      || (sc.frames.start || sc.frames.end
+        ? "The clip opens or ends exactly on these pictures. Describe the first and last shot to match them."
+        : "Leave them empty and H3 designs the shot from the text. A Blender render, a still from an earlier clip, or a picture from the Create tab works.");
+  }
+
+  async function setFrame(key, f) {
+    const sc = scene();
+    sc.frames[key] = { busy: true, name: f.name };
+    drawFrames();
+    try {
+      const bitmap = await createImageBitmap(f);
+      const size = { width: bitmap.width, height: bitmap.height };
+      bitmap.close();
+      sc.frames[key] = { ...(await pickPicture(f)), name: f.name, ...size };
+    } catch (e) {
+      sc.frames[key] = null;
+      msg(`${f.name}: ${e.message}`);
+    }
+    if (sc === scene()) drawFrames();
+    changed();
+  }
+  let frameKey = "start";
+
   function drawScene() {
     const sc = scene();
     $("#stSceneNo").textContent = String(S.at + 1);
@@ -444,6 +523,7 @@
     $("#stSceneSound").value = sc.sound;
     $("#stSceneSound").placeholder = trim(S.music) || "Ambient sound that matches the setting";
     $("#stDelScene").hidden = S.scenes.length < 2;
+    drawFrames();
     drawBlocking();
     drawShots();
   }
@@ -671,8 +751,14 @@ s.render.filepath = "//blocking_scene${n}_"
     if (blk?.file && blk.pod && blk.pod !== pod() && !DEMO) throw new Error("its blocking video is on another pod: add it again");
     const refs = [];
     for (const item of refsFor().files) refs.push(await onPod(item, item === S.place ? "place" : item.name || "character"));
+    // first frame = 0, last frame = -1 (server.py counts a negative index back from the end)
+    const keyframes = [];
+    for (const [key, frame] of [["start", 0], ["end", -1]]) {
+      const fr = sc.frames?.[key];
+      if (fr) keyframes.push({ file: await onPod(fr, `scene${i + 1}-${key}`), frame });
+    }
     return {
-      mode: "free", prompt: buildPrompt(sc), seconds, aspect: S.aspect, refs,
+      mode: "free", prompt: buildPrompt(sc), seconds, aspect: S.aspect, refs, keyframes,
       ref_videos: blk?.file ? [blk.file] : [],
       label: `${S.title.trim() ? S.title.trim() + " · " : ""}${i + 1}. ${sc.title.trim() || `Scene ${i + 1}`}`,
       count: S.takes, hd: S.hd, fast: S.fast && !$("#stFast").disabled, sparse: true, upscale: false, loras: [],
@@ -687,7 +773,10 @@ s.render.filepath = "//blocking_scene${n}_"
     const strip = (x) => x && { ...x, thumb: undefined, busy: undefined };
     return {
       ...S, at: i, place: strip(S.place), cast: S.cast.map(strip),
-      scenes: S.scenes.map((sc) => ({ ...sc, state: undefined, blocking: strip(sc.blocking) })),
+      scenes: S.scenes.map((sc) => ({
+        ...sc, state: undefined, blocking: strip(sc.blocking),
+        frames: { start: strip(sc.frames?.start), end: strip(sc.frames?.end) },
+      })),
     };
   }
 
@@ -754,12 +843,15 @@ s.render.filepath = "//blocking_scene${n}_"
     const keep = (x) => x && { ...x, pod: here, thumb: x.file && !DEMO ? A.refUrl(x.file) : null };
     S = settle(Object.assign(blank(), st, {
       place: keep(st.place), cast: (st.cast || []).map(keep),
-      scenes: (st.scenes || []).map((sc) => ({ ...sc, blocking: sc.blocking && { ...sc.blocking, pod: here } })),
+      scenes: (st.scenes || []).map((sc) => ({
+        ...sc, blocking: sc.blocking && { ...sc.blocking, pod: here },
+        frames: { start: keep(sc.frames?.start), end: keep(sc.frames?.end) },
+      })),
     }));
     if (!S.scenes.length) S.scenes = [newScene(1)];
     S.at = Math.min(st.at || 0, S.scenes.length - 1);
     // a refUrl thumbnail is a link to this pod; keep a copy of the picture so the story outlives it
-    for (const item of [S.place, ...S.cast].filter((x) => x?.thumb)) {
+    for (const item of [S.place, ...S.cast, ...frameItems(S)].filter((x) => x?.thumb)) {
       shrink(item.thumb, 1024).then((t) => { item.thumb = t; save(); }).catch(() => {});
     }
     drawAll();
@@ -892,6 +984,7 @@ s.render.filepath = "//blocking_scene${n}_"
     await photo(story.place, S.place || {}, "place");
     for (const [i, sc] of story.scenes.entries()) {
       delete sc.state;
+      for (const key of FRAME_KEYS) await photo(sc.frames?.[key], S.scenes[i].frames?.[key] || {}, `scene-${i + 1}-${key}-frame`);
       const blk = S.scenes[i].blocking, url = blk?.file && videoUrls.get(blk.file);
       if (url) {
         const ext = (VIDEO_EXT.exec(blk.name || "")?.[0] || ".mp4").toLowerCase();
@@ -958,11 +1051,11 @@ s.render.filepath = "//blocking_scene${n}_"
     // the media first, while the story is still the file's own objects
     const problems = [];
     const photos = new Map(), videos = new Map();
-    for (const x of [st.place, ...(st.cast || [])]) if (x) photos.set(x, await pack.photo(x));
+    for (const x of [st.place, ...(st.cast || []), ...frameItems(st)]) if (x) photos.set(x, await pack.photo(x));
     for (const sc of st.scenes) if (sc.blocking) videos.set(sc, await pack.video(sc));
 
     S = Object.assign(blank(), st, { at: 0 });
-    for (const x of [S.place, ...S.cast]) {
+    for (const x of [S.place, ...S.cast, ...frameItems(S)]) {
       if (!x) continue;
       const blob = photos.get(x);
       Object.assign(x, { file: null, pod: null, thumb: null });
@@ -978,6 +1071,7 @@ s.render.filepath = "//blocking_scene${n}_"
     if (S.place && !S.place.thumb) S.place = null;
     for (const sc of S.scenes) {
       delete sc.state;
+      sc.frames = { start: sc.frames?.start?.thumb ? sc.frames.start : null, end: sc.frames?.end?.thumb ? sc.frames.end : null };
       const blob = sc.blocking && videos.get(sc);
       if (blob) Object.assign(sc.blocking, { file: null, pod: null, busy: true, blob });
       else sc.blocking = null;
@@ -1010,13 +1104,13 @@ s.render.filepath = "//blocking_scene${n}_"
       if (sc === scene()) drawScene();
     }
     msg("Uploading the pictures…");
-    for (const x of [S.place, ...S.cast]) {
+    for (const x of [S.place, ...S.cast, ...frameItems(S)]) {
       if (!x?.blob) continue;
       const blob = x.blob;
       delete x.blob;
       try {
         const type = blob.type || "image/jpeg";
-        const name = `${safeName(x.name, "picture")}.${type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg"}`;
+        const name = `${safeName((x.name || "").replace(/\.\w+$/, ""), "picture")}.${type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg"}`;
         const original = new File([blob], name, { type });
         x.file = await upload(original);
         x.pod = pod();
@@ -1059,6 +1153,7 @@ s.render.filepath = "//blocking_scene${n}_"
   $$("#stAspect button").forEach((b) => b.addEventListener("click", () => {
     S.aspect = b.dataset.aspect;
     setSeg("stAspect", "aspect", S.aspect);
+    drawFrames();
     drawBlocking();
     if ($("#stBlenderShow").open) $("#stBlenderCode").textContent = blenderScript();
     changed();
@@ -1146,6 +1241,12 @@ s.render.filepath = "//blocking_scene${n}_"
     drawShots();
     changed();
     $$("#stShots .sp-what").pop()?.focus();
+  });
+
+  $("#stFrameFile").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (f) setFrame(frameKey, f);
   });
 
   $("#stBlockingBtn").addEventListener("click", () => $("#stBlockingFile").click());

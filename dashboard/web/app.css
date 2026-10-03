@@ -740,6 +740,21 @@ select { width: auto; padding: 7px 10px; font-family: var(--sans); }
 .st-scene-links { gap: 14px; margin: 0; }
 .st-scene .sp-fields { margin-top: 8px; }
 
+/* start and end frames: shown at the clip's shape, cut the way the pod cuts them */
+.st-frames { margin: 16px 0 6px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; background: var(--s1); }
+.st-frames-head i { font-style: normal; }
+.st-frames > p { margin: 0; }
+.st-frame-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.st-frame { display: grid; gap: 6px; align-content: start; justify-items: start; min-width: 0; }
+.st-frame-box { width: 100%; max-width: 260px; max-height: 260px; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--s2); box-shadow: var(--key); cursor: pointer; display: grid; place-items: center; }
+.st-frame-box:hover { box-shadow: var(--violet) 0 0 0 2px; }
+.st-frame-box img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.st-frame-box.busy img { opacity: 0.4; }
+.st-frame-box .st-nopic { border: 0; }
+.st-frame-acts { margin: 0; gap: 12px; }
+.st-frame-acts .x { background: none; border: 0; color: var(--ink-3); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
+.st-frame-acts .x:hover { color: var(--ink); }
+
 /* the blocking video */
 .st-blocking { margin: 16px 0 6px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; background: var(--s1); }
 .st-blocking-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }

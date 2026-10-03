@@ -365,6 +365,15 @@
     "Uploading the pictures…": "กำลังอัปโหลดรูป…",
     "Stopped waiting. Make all scenes queues them when you are ready.": "หยุดรอแล้ว กด ทำทั้งหมด เมื่อพร้อมเพื่อเข้าคิว",
 
+    // Story tab: start and end frames
+    "Start and end frames": "ภาพเปิดและภาพปิดฉาก",
+    "optional · empty = H3 designs the shot": "ไม่ใส่ก็ได้ · ถ้าว่าง H3 จะออกแบบช็อตเอง",
+    "First frame": "ภาพแรก",
+    "Last frame": "ภาพสุดท้าย",
+    "+ picture": "+ รูป",
+    "The clip opens or ends exactly on these pictures. Describe the first and last shot to match them.": "คลิปจะเปิดหรือปิดด้วยภาพเหล่านี้พอดี เขียนช็อตแรกและช็อตสุดท้ายให้ตรงกับภาพ",
+    "Leave them empty and H3 designs the shot from the text. A Blender render, a still from an earlier clip, or a picture from the Create tab works.": "เว้นว่างไว้ H3 จะออกแบบช็อตจากข้อความเอง ใช้ภาพ render จาก Blender ภาพนิ่งจากคลิปก่อนหน้า หรือรูปจากแท็บสร้างก็ได้",
+
     // Shopee affiliate tab (shopee.js, added for this workspace)
     "Shopee affiliate": "คลิป Shopee Affiliate",
     "Product photos and a few words in, a vertical clip out: a hook, the product working, and a call to the basket, spoken in Thai.":
@@ -571,6 +580,9 @@
     [/^Imported (.+): (\d+) scenes?\.$/, "นำเข้า $1 แล้ว: $2 ฉาก"],
     [/^(.+) is not a story file exported from this tab\.$/, "$1 ไม่ใช่ไฟล์เรื่องที่ส่งออกจากแท็บนี้"],
     [/^(?:(\d+) queued\. )?Waiting for the pod: (.+)\. (\d+) scenes? will queue by themselves when it is ready; keep this tab open\.$/, "กำลังรอ pod: $2 อีก $3 ฉากจะเข้าคิวเองเมื่อพร้อม อย่าปิดแท็บนี้"],
+    // Story tab: start and end frames
+    [/^Use scene (\d+)'s last frame$/, "ใช้ภาพสุดท้ายของฉาก $1"],
+    [/^The (first|last) frame is (\d+)×(\d+); its edges outside ([\d:]+) are cut off, as shown\.$/, "ภาพนี้ขนาด $2×$3 ขอบที่เกิน $4 จะถูกตัดออกตามที่เห็น"],
   ];
 
   const PH = {  // placeholders

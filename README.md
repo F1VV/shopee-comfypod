@@ -122,6 +122,16 @@ it. To prepare everything before the pod is up:
 
 Scenes run in the Queue one after another, each with its takes.
 
+## Story tab: start and end frames
+
+Each scene can be given the picture it **opens on** and the picture it **ends on**. They go to
+the pod as pinned frames (frame 0 and the last frame), the same mechanism as the Create tab's
+pinned frames, so H3 starts and finishes the clip on exactly those pictures. Either one, both or
+neither: an empty slot leaves that end of the shot to H3. A picture of another shape is cut to the
+clip's shape around its centre, as the slot shows. "Use scene N's last frame" starts a scene
+exactly where the previous one ends, for continuity across clips. Frames travel in the
+`.story.zip` (`photos/scene-N-start-frame…`).
+
 ## Story tab: blocking videos from Blender
 
 1. Block the scene with simple shapes or mannequins, give each character its own colour, and
