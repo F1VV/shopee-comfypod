@@ -1110,6 +1110,9 @@ ALLOWED_REF_EXT = {".png", ".jpg", ".jpeg", ".webp"}
 # Reference videos (<Video N>): the Story tab's Blender blocking render, which H3 follows for
 # camera movement, cuts and timing. ComfyUI's LoadVideo reads these through PyAV.
 ALLOWED_VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv"}
+# Reference audios (<Audio N>): recorded dialogue, or the Story tab's other camera angle (which
+# sends a clip, a video file, whose sound track is used). ComfyUI's LoadAudio reads these.
+ALLOWED_AUDIO_EXT = {".wav", ".mp3", ".flac", ".m4a", ".ogg"}
 # The clip is as long as its shots add up to (owner 2026-09-16), so this is a range rather than
 # two fixed choices. The ceiling is memory: a 10 s clip at 704x1280 already fills most of a 96 GB
 # card once the upscaler runs, and nothing longer than 15 s has been measured on this template.
@@ -1127,8 +1130,9 @@ MAX_REFS = 9
 # MiniMaxH3AddGuide chains without a limit of its own, so this cap is ours — the same 9 as the
 # references, which is already more pictures than a short clip has room for.
 MAX_KEYFRAMES = 9
-# MiniMaxH3ReferenceToVideo's own limit: 3 ref_videos slots
+# MiniMaxH3ReferenceToVideo's own limits: 3 ref_videos slots, 3 ref_audios slots
 MAX_REF_VIDEOS = 3
+MAX_REF_AUDIOS = 3
 MAX_REF_BYTES = 20 * 1024 * 1024
 # a 15 s blocking render is a few MB at the clip's size; this leaves room for a 1080p export
 MAX_VIDEO_BYTES = 200 * 1024 * 1024
@@ -1160,6 +1164,23 @@ def _ref_videos(cfg: Config, raw) -> list[str]:
         name = _safe_input_name(cfg, name)
         if Path(name).suffix.lower() not in ALLOWED_VIDEO_EXT:
             raise ValueError(f"{name} is not a video ({', '.join(sorted(ALLOWED_VIDEO_EXT))})")
+        out.append(name)
+    return out
+
+
+def _ref_audios(cfg: Config, raw) -> list[str]:
+    """[filename] -> the reference audios: audio files, or videos whose sound track is used."""
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, list) or not all(isinstance(a, str) for a in raw):
+        raise ValueError("ref_audios must be a list of uploaded audio or video filenames")
+    if len(raw) > MAX_REF_AUDIOS:
+        raise ValueError(f"{len(raw)} reference audios; H3 takes at most {MAX_REF_AUDIOS}")
+    out = []
+    for name in raw:
+        name = _safe_input_name(cfg, name)
+        if Path(name).suffix.lower() not in ALLOWED_AUDIO_EXT | ALLOWED_VIDEO_EXT:
+            raise ValueError(f"{name} is not an audio or video file")
         out.append(name)
     return out
 
@@ -1419,6 +1440,7 @@ def _gen_view(job: dict, cfg: Config, ahead: int) -> dict:
             "finished",
             "label",
             "batch",
+            "tag",
         )
     }
     p = cfg.progress.get(job["prompt_id"])
@@ -1455,13 +1477,13 @@ async def post_beginner_upload(request: web.Request) -> web.Response:
     if field_ is None or not field_.filename:
         return web.json_response({"error": "no file uploaded"}, status=400)
     ext = Path(field_.filename).suffix.lower()
-    if ext in ALLOWED_VIDEO_EXT:
+    if ext in ALLOWED_VIDEO_EXT | ALLOWED_AUDIO_EXT:
         return await _upload_video(cfg, field_, ext)
     if ext not in ALLOWED_REF_EXT:
         return web.json_response(
             {
                 "error": f"unsupported file type {ext or '(none)'}; allowed: "
-                + ", ".join(sorted(ALLOWED_REF_EXT | ALLOWED_VIDEO_EXT))
+                + ", ".join(sorted(ALLOWED_REF_EXT | ALLOWED_VIDEO_EXT | ALLOWED_AUDIO_EXT))
             },
             status=400,
         )
@@ -1483,10 +1505,10 @@ async def post_beginner_upload(request: web.Request) -> web.Response:
 
 
 async def _upload_video(cfg: Config, field_, ext: str) -> web.Response:
-    """A reference video, streamed to input/ so a big render is never held in memory whole."""
+    """A reference video or audio, streamed to input/ so a big file is never held in memory whole."""
     input_dir = cfg.input_dir()
     input_dir.mkdir(parents=True, exist_ok=True)
-    name = f"refvid_{uuid.uuid4().hex}{ext}"
+    name = f"{'refaud' if ext in ALLOWED_AUDIO_EXT else 'refvid'}_{uuid.uuid4().hex}{ext}"
     path = input_dir / name
     size = 0
     try:
@@ -1495,7 +1517,7 @@ async def _upload_video(cfg: Config, field_, ext: str) -> web.Response:
                 size += len(chunk)
                 if size > MAX_VIDEO_BYTES:
                     raise ValueError(
-                        f"the video is over {MAX_VIDEO_BYTES // 1024 // 1024} MB; render it at"
+                        f"the file is over {MAX_VIDEO_BYTES // 1024 // 1024} MB; render a video at"
                         " the clip's size (576x1024 is plenty for a blocking guide)"
                     )
                 f.write(chunk)
@@ -1504,7 +1526,7 @@ async def _upload_video(cfg: Config, field_, ext: str) -> web.Response:
         return web.json_response({"error": str(e)}, status=400)
     if not size:
         path.unlink(missing_ok=True)
-        return web.json_response({"error": "the video file is empty"}, status=400)
+        return web.json_response({"error": "the file is empty"}, status=400)
     return web.json_response({"filename": name})
 
 
@@ -1682,12 +1704,13 @@ def _clip_plan(cfg: Config, body: dict, *, runnable: bool) -> dict:
     except ValueError as e:
         raise BadRequest(str(e)) from None
     for r in refs:
-        if Path(r).suffix.lower() in ALLOWED_VIDEO_EXT:
-            raise BadRequest(f"{r} is a video: send it in ref_videos, not refs")
+        if Path(r).suffix.lower() not in ALLOWED_REF_EXT:
+            raise BadRequest(f"{r} is not a picture: videos go in ref_videos, sound in ref_audios")
 
     try:
         keyframes = _keyframes(cfg, body.get("keyframes"), seconds)
         ref_videos = _ref_videos(cfg, body.get("ref_videos"))
+        ref_audios = _ref_audios(cfg, body.get("ref_audios"))
     except ValueError as e:
         raise BadRequest(str(e)) from None
 
@@ -1760,6 +1783,7 @@ def _clip_plan(cfg: Config, body: dict, *, runnable: bool) -> dict:
             loras=chain,
             keyframes=keyframes,
             ref_videos=ref_videos,
+            ref_audios=ref_audios,
             sparse=sparse,
             **settings,
         )
@@ -1782,6 +1806,9 @@ def _clip_plan(cfg: Config, body: dict, *, runnable: bool) -> dict:
             "label": (str(body.get("label") or "").strip() or prompt_text.splitlines()[0])[:80]
             if mode == "free"
             else None,
+            # the browser's own name for what this clip is (the Story tab's "story:<scene id>"),
+            # handed back in the queue so it can find a scene's finished clip again
+            "tag": str(body.get("tag") or "")[:64] or None,
             # written beside each file the clip produces, so "Use this recipe" in Outputs can
             # put the whole form back. `form` is the browser's own state, stored as it came.
             "recipe": {
@@ -1792,6 +1819,7 @@ def _clip_plan(cfg: Config, body: dict, *, runnable: bool) -> dict:
                 "refs": refs,
                 "keyframes": [{"file": f, "frame": i} for f, i in keyframes],
                 "ref_videos": ref_videos,
+                "ref_audios": ref_audios,
                 "seed": seed_,
                 "seconds": seconds,
                 "upscale": upscale,
@@ -2134,7 +2162,8 @@ async def post_workflow(request: web.Request) -> web.Response:
 
 
 async def post_ref_from_output(request: web.Request) -> web.Response:
-    """Copy a made image into input/ as a reference, so it can star in a clip or be edited."""
+    """Copy a made image into input/ as a reference, so it can star in a clip or be edited; or a
+    made clip, whose sound track another clip can take (the Story tab's second camera angle)."""
     cfg: Config = request.app["cfg"]
     body = await request.json()
     try:
@@ -2142,11 +2171,13 @@ async def post_ref_from_output(request: web.Request) -> web.Response:
     except (ValueError, IndexError) as e:
         return web.json_response({"error": str(e) or "no such output"}, status=400)
     ext = Path(arc).suffix.lower()
-    if ext not in ALLOWED_REF_EXT:
-        return web.json_response({"error": "only a picture can be used as a reference"}, status=400)
+    if ext not in ALLOWED_REF_EXT | ALLOWED_VIDEO_EXT:
+        return web.json_response(
+            {"error": "only a picture or a clip can be used as a reference"}, status=400
+        )
     input_dir = cfg.input_dir()
     input_dir.mkdir(parents=True, exist_ok=True)
-    name = f"ref_{uuid.uuid4().hex}{ext}"
+    name = f"{'refvid' if ext in ALLOWED_VIDEO_EXT else 'ref'}_{uuid.uuid4().hex}{ext}"
     await asyncio.to_thread(shutil.copyfile, path, input_dir / name)
     return web.json_response({"filename": name})
 

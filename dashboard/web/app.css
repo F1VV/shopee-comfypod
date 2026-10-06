@@ -755,6 +755,17 @@ select { width: auto; padding: 7px 10px; font-family: var(--sans); }
 .st-frame-acts .x { background: none; border: 0; color: var(--ink-3); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
 .st-frame-acts .x:hover { color: var(--ink); }
 
+/* the scene's dialogue sound (<Audio 1>) */
+#stAudio { display: grid; gap: 6px; justify-items: start; }
+#stAudio p { margin: 0; }
+#stAudio audio { width: 100%; max-width: 420px; height: 36px; }
+.st-audio-src { margin: 0; gap: 10px; flex-wrap: wrap; }
+.st-audio-src select { max-width: 100%; }
+#stAudioModeRow { display: grid; gap: 6px; justify-items: start; }
+#stAudioModeRow p { margin: 0; }
+#stAudioMode { flex-wrap: wrap; }
+.st-state.waiting { color: var(--wait); background: var(--wait-tint); }
+
 /* the blocking video */
 .st-blocking { margin: 16px 0 6px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; background: var(--s1); }
 .st-blocking-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }

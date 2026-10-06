@@ -34,8 +34,8 @@ replaced in the image:
 
 | File in the image | Change |
 |---|---|
-| `/opt/aiangel/dashboard/server.py` | the upload route also takes `.mp4 .mov .webm .mkv` (up to 200 MB, streamed to disk); a clip request takes `ref_videos` (up to 3); a free-prompt clip can carry its own queue `label` |
-| `/opt/comfyui/custom_nodes.baked/ComfyUI-AiAngel/h3_workflows.py` | each reference video goes `LoadVideo` → cut to the clip's frame count → fitted to the clip's size → `MiniMaxH3ReferenceToVideo`'s `ref_videos` slot |
+| `/opt/aiangel/dashboard/server.py` | the upload route also takes videos (`.mp4 .mov .webm .mkv`) and sound (`.wav .mp3 .flac .m4a .ogg`), up to 200 MB, streamed to disk; a clip request takes `ref_videos` and `ref_audios` (up to 3 each), its own queue `label` and a `tag` the queue hands back; "ref-from-output" also copies a finished clip in |
+| `/opt/comfyui/custom_nodes.baked/ComfyUI-AiAngel/h3_workflows.py` | each reference video goes `LoadVideo` → cut to the clip's frame count → fitted to the clip's size → `MiniMaxH3ReferenceToVideo`'s `ref_videos` slot; each reference audio (an audio file, or a clip's sound track) is cut to the clip's length → `ref_audios` |
 
 A clip without a video builds exactly the same graph as before. `backend/original/` holds the
 untouched files from `BASE_IMAGE`: `diff -u backend/original/server.py
@@ -131,6 +131,19 @@ neither: an empty slot leaves that end of the shot to H3. A picture of another s
 clip's shape around its centre, as the slot shows. "Use scene N's last frame" starts a scene
 exactly where the previous one ends, for continuity across clips. Frames travel in the
 `.story.zip` (`photos/scene-N-start-frame…`).
+
+## Story tab: two camera angles on one dialogue
+
+**+ Another angle** copies the open scene (same shots, lines and seconds) as a second camera on it.
+Change each shot's camera, e.g. over Ken's shoulder onto Mali in angle 1 and the reverse in angle
+2. The angle's **Dialogue sound** is set to the first scene's finished clip: when it is queued, that
+clip's sound goes to H3 as `<Audio 1>` marked `fully_copy` (H3's guide: the source audio becomes the
+clip's complete final audio track), so H3 moves the lips and the action to the same voices and
+timing and the two clips cut together. **Make all scenes** queues the first scene, waits until its
+clip is finished, then queues the angle with its sound. With several takes, pick which take's
+sound to use. **Same voices only** borrows just the voices (the dialogue is spoken again), and
+**+ Upload sound** takes a recorded dialogue or any clip instead. Keep both angles' shot lengths and
+lines the same; the scene box warns when they drift apart.
 
 ## Story tab: blocking videos from Blender
 

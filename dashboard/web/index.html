@@ -676,6 +676,7 @@
           <div class="seg st-scenes" id="stScenes"></div>
           <span class="row tight st-scene-links">
             <button class="link" id="stAddScene" type="button">+ Scene</button>
+            <button class="link" id="stAngle" type="button" title="A second camera on this scene's dialogue: same lines and timing, its sound taken from this scene's clip">+ Another angle</button>
             <button class="link" id="stDupScene" type="button">Duplicate</button>
             <button class="link" id="stDelScene" type="button">Delete</button>
           </span>
@@ -704,6 +705,25 @@
             </div>
             <p class="small dim" id="stFramesNote"></p>
             <input id="stFrameFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+          </div>
+
+          <div class="st-frames st-audio">
+            <div class="st-blocking-head">
+              <b>Dialogue sound</b> <i class="small dim">optional · goes to H3 as &lt;Audio 1&gt;</i>
+              <span class="spacer"></span>
+              <button class="link" id="stAudioUpload" type="button" title="A recorded dialogue or any clip whose sound to use">+ Upload sound</button>
+              <button class="link" id="stAudioRemove" type="button" hidden>Remove</button>
+              <input id="stAudioFile" type="file" accept="audio/*,video/*,.wav,.mp3,.m4a,.flac,.ogg,.mp4,.mov,.webm" hidden>
+            </div>
+            <div id="stAudio"></div>
+            <div class="opt" id="stAudioModeRow" hidden>
+              <span class="opt-k">Use it as</span>
+              <div class="seg" id="stAudioMode">
+                <button data-mode="exact" aria-pressed="true">Exact sound (lip-sync)</button>
+                <button data-mode="voices">Same voices only</button>
+              </div>
+              <p class="small dim" id="stAudioModeNote"></p>
+            </div>
           </div>
 
           <div class="st-blocking">

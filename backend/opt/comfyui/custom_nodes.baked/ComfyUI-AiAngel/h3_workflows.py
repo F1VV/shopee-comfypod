@@ -9,8 +9,8 @@ their audio of the previous clip are anchored at frame 0 of a new ref2va generat
 cross-faded 50/50, and previous head + blend + new tail are stitched into one video in the graph.
 
 Only ComfyUI core nodes are used, so a graph runs on any ComfyUI >= 0.35.0 with the H3 models.
-Every function returns an API-format dict; `refs` / `ref_videos` / `prev_video` are file names
-already in input/.
+Every function returns an API-format dict; `refs` / `ref_videos` / `ref_audios` / `prev_video` are
+file names already in input/.
 """
 
 from __future__ import annotations
@@ -153,15 +153,21 @@ TITLES = {
     "refine_decode": "Decode video (upscaled)",
     "refine_decode_audio": "Decode audio (upscaled)",
     "video": "Create video",
+    "audsecs": "Clip seconds (for the reference audio)",
 }
 
-# a reference video's four nodes, numbered like the pictures' <Picture N>
+# a reference video's four nodes, and a reference audio's, numbered like the pictures' <Picture N>
 VIDEO_TITLES = {
     "vid": "<Video {n}>",
     "vidpart": "<Video {n}> frames",
     "vidcut": "<Video {n}> cut to the clip's length",
     "vidfit": "<Video {n}> fitted to the clip's size",
+    "aud": "<Audio {n}>",
+    "audpart": "<Audio {n}> taken from its video",
+    "audcut": "<Audio {n}> cut to the clip's length",
 }
+# a reference audio may be a video file, whose sound track is used (another clip's dialogue)
+VIDEO_SUFFIXES = (".mp4", ".mov", ".webm", ".mkv")
 
 
 def _numbered(g: dict) -> dict:
@@ -231,6 +237,7 @@ def _reference(
     ref_size: str = "match",
     keyframes: list[tuple[str, int]] = (),
     ref_videos: list[str] = (),
+    ref_audios: list[str] = (),
 ) -> list:
     """The conditioning + AV latent the sampler runs on, always under the "r2v" key, so sampling
     and upscaling wire up unchanged. Returns the positive link, which is "r2v" itself unless a
@@ -250,7 +257,13 @@ def _reference(
     MiniMaxH3ReferenceToVideo's own ref_videos slots (the node takes 3), so a clip with a video
     and no picture still takes the reference path. Each is cut to the clip's frame count, so a
     long render cannot blow up memory, and cover-cropped to the clip's size like a pinned frame.
-    The video is read at its own frame rate: a render made at 24 fps lines up frame for frame."""
+    The video is read at its own frame rate: a render made at 24 fps lines up frame for frame.
+
+    `ref_audios` are reference audios (`<Audio N>`, numbered on their own): the guide uses them as
+    a voice-timbre reference, or "fully_copy" as the clip's complete final audio track — the Story
+    tab's second camera angle takes the first angle's dialogue that way. A video file gives its
+    sound track (an earlier clip), an audio file itself. Each is cut to the clip's length and goes
+    to MiniMaxH3ReferenceToVideo's own ref_audios slots (the node takes 3)."""
     for i, name in enumerate(refs):
         g[f"ref{i}"] = _node("LoadImage", image=name)
     for i, (name, _index) in enumerate(keyframes):
@@ -287,8 +300,23 @@ def _reference(
             height=height,
             crop="center",
         )
+    for i, name in enumerate(ref_audios):
+        if name.lower().endswith(VIDEO_SUFFIXES):
+            g[f"aud{i}"] = _node("LoadVideo", file=name)
+            g[f"audpart{i}"] = _node("GetVideoComponents", video=[f"aud{i}", 0])
+            sound = [f"audpart{i}", 1]
+        else:
+            g[f"aud{i}"] = _node("LoadAudio", audio=name)
+            sound = [f"aud{i}", 0]
+        if "audsecs" not in g:
+            g["audsecs"] = _node(
+                "ComfyMathExpression", expression="a / 24", **{"values.a": ["length", 1]}
+            )
+        g[f"audcut{i}"] = _node(
+            "TrimAudioDuration", audio=sound, start_index=0.0, duration=["audsecs", 0]
+        )
     anchored: list[tuple[str, int]] = []
-    if not refs and not ref_videos:
+    if not refs and not ref_videos and not ref_audios:
         frames = frame_count(seconds)
         slots: dict[str, list] = {}
         for i, (_name, index) in enumerate(keyframes):
@@ -322,6 +350,7 @@ def _reference(
             ref_image_size=ref_size,
             **{f"ref_images.ref_image_{i}": [f"ref{i}", 0] for i in range(len(refs))},
             **{f"ref_videos.ref_video_{i}": [f"vidfit{i}", 0] for i in range(len(ref_videos))},
+            **{f"ref_audios.ref_audio_{i}": [f"audcut{i}", 0] for i in range(len(ref_audios))},
         )
     positive = ["r2v", 0]
     for n, (key, index) in enumerate(anchored):
@@ -437,11 +466,21 @@ def clip(
     upscale_model: str = UPSCALE_MODEL,
     keyframes: list[tuple[str, int]] = (),
     ref_videos: list[str] = (),
+    ref_audios: list[str] = (),
 ) -> dict:
     g: dict = {}
     model = _models(g, list(loras), attention, turbo, unet, sparse)
     positive = _reference(
-        g, prompt, refs, width, height, seconds, ref_size, list(keyframes), list(ref_videos)
+        g,
+        prompt,
+        refs,
+        width,
+        height,
+        seconds,
+        ref_size,
+        list(keyframes),
+        list(ref_videos),
+        list(ref_audios),
     )
     _sample(g, model, positive, seed, steps, sampler, scheduler)
     if upscale:

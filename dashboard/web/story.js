@@ -75,6 +75,10 @@
     blocking: null,  // {file, pod, name, duration, width, height, follow}
     // pictures the clip opens and ends exactly on; empty = H3 designs the shot from the text
     frames: { start: null, end: null },  // each {file, pod, thumb, name, width, height}
+    // <Audio 1>: another scene's finished clip (`from`, a scene id: a second camera angle on the
+    // same dialogue) or an uploaded sound file; `mode` "exact" copies it as the clip's sound,
+    // "voices" only borrows the voices. {mode, from, file, pod, name, output, duration}
+    audio: null,
   });
   const blank = () => ({
     title: "", logline: "", where: "", when: "", look: "film", lookText: "", aspect: "16:9",
@@ -98,10 +102,11 @@
   // what only lives while a picture or video is uploading; and frames for scenes made before them
   const settle = (st) => {
     for (const sc of st.scenes) sc.frames = { start: sc.frames?.start || null, end: sc.frames?.end || null };
-    for (const x of [st.place, ...st.cast, ...frameItems(st), ...st.scenes.map((sc) => sc.blocking)]) if (x) delete x.busy;
+    for (const x of [st.place, ...st.cast, ...frameItems(st), ...st.scenes.flatMap((sc) => [sc.blocking, sc.audio])]) if (x) delete x.busy;
     if (st.place && !st.place.thumb) st.place = null;
     for (const sc of st.scenes) {
       if (sc.blocking && !sc.blocking.file) sc.blocking = null;
+      if (sc.audio && !sc.audio.from && !sc.audio.file) sc.audio = null;
       for (const k of FRAME_KEYS) if (sc.frames[k] && !sc.frames[k].thumb) sc.frames[k] = null;
     }
     return st;
@@ -122,6 +127,8 @@
 
   // blob URLs of the blocking videos picked in this page session, by filename on the pod
   const videoUrls = new Map();
+  // the same for uploaded sound files (<Audio 1>)
+  const audioUrls = new Map();
   // the photos as they were picked in this page session (full size), by filename on the pod, so
   // an exported story carries them rather than the 1024 px copy kept in localStorage
   const originals = new Map();
@@ -218,7 +225,12 @@
     const follow = blk?.follow || "full";
     const where = trim(sc.where) || trim(S.where);
     const when = trim(sc.when) || trim(S.when);
-    const anyRef = picOf.size > 0 || placePic > 0 || !!blk;
+    const aud = sc.audio && (sc.audio.file || sc.audio.from) ? sc.audio : null;
+    const exact = aud && aud.mode !== "voices";
+    const anyRef = picOf.size > 0 || placePic > 0 || !!blk || !!aud;
+    // who speaks in this scene, in cast order: the voices <Audio 1> stands for
+    const speakers = [...new Set(sc.shots.flatMap((s) => s.lines.filter((l) => l.text.trim())
+      .map((l) => S.cast.findIndex((c) => c.id === l.who))))].filter((k) => k >= 0).sort((a, b) => a - b);
 
     // Who a character is called in the text. With any reference, H3 gets <Subject N> definitions
     // (as prompt_build.py does); with none it is plain text-to-video, so a character is named by
@@ -265,6 +277,13 @@
         }[follow];
         parts.push(`<Video 1> is an untextured grey 3D blocking animation (previz) of this scene. ${use} Do not copy its grey, untextured look: the real characters, the place and the light replace the blocking shapes.`);
       }
+      if (aud) {
+        // the guide's own audio wording: a voice-timbre reference, or the complete final track
+        const who = speakers.map((k) => `<Subject ${k + 1}> (S${k + 1})`);
+        parts.push(exact
+          ? "<Audio 1> is the finished soundtrack of this same scene, made for another camera angle: the same dialogue, voices, timing and sounds."
+          : `<Audio 1> is the voice-timbre reference for ${who.length > 1 ? `${who.slice(0, -1).join(", ")} and ${who[who.length - 1]}` : who[0] || "the speaking characters"}.`);
+      }
       parts.push("");
     }
 
@@ -308,6 +327,11 @@
           timing: "<Video 1> (cut and pacing structure): weak_reference",
         }[follow]);
       }
+      if (aud) {
+        parts.push(exact
+          ? "<Audio 1>: fully_copy - the complete audio of <Audio 1> is this clip's complete final audio track; lips, faces and actions follow its dialogue and timing exactly."
+          : "<Audio 1>: reference - only the voices' timbre is referenced; the dialogue below is spoken anew in those voices.");
+      }
       parts.push("");
     }
 
@@ -339,7 +363,9 @@
     const voices = speaks
       ? S.cast.map((c, i) => c.voice.trim() && `${call(i)}'s voice: ${trim(c.voice)}`).filter(Boolean) : [];
     const sound = trim(sc.sound) || trim(S.music) || "Ambient sound that matches the setting";
-    parts.push("overall_soundscape:", [sound, ...voices].map(cap).join(". ") + ".");
+    parts.push("overall_soundscape:", exact
+      ? "The complete audio of <Audio 1>, unchanged: the same dialogue, voices and sounds at the same moments."
+      : [sound, ...voices].map(cap).join(". ") + ".");
     return parts.join("\n");
   }
 
@@ -512,6 +538,134 @@
   }
   let frameKey = "start";
 
+  const sceneNo = (id) => S.scenes.findIndex((x) => x.id === id) + 1;
+  const isClip = (path) => VIDEO_EXT.test(path || "");
+  // what a scene's dialogue says, to tell whether two angles still match
+  const dialogue = (sc) => sc.shots.flatMap((s) => s.lines.map((l) => `${l.who}:${l.text.trim()}`)).join("|");
+
+  function mediaDuration(url) {
+    return new Promise((resolve) => {
+      const a = document.createElement("audio");
+      a.preload = "metadata";
+      a.onloadedmetadata = () => resolve(Number.isFinite(a.duration) ? a.duration : null);
+      a.onerror = () => resolve(null);
+      a.src = url;
+    });
+  }
+
+  // a scene's finished clips, newest last, from the queue the server keeps (its tag names the scene)
+  async function madeClips(id) {
+    const jobs = DEMO ? [] : (await api("beginner/status")).jobs || [];
+    const mine = jobs.filter((j) => j.tag === `story:${id}`);
+    const made = mine.filter((j) => j.state === "finished")
+      .flatMap((j) => (j.outputs || []).filter((o) => isClip(o.path)).map((o) => ({ path: o.path, seed: j.seed })));
+    return { made: made.reverse(), busy: mine.some((j) => j.state === "queued" || j.state === "running") };
+  }
+
+  function drawAudio() {
+    const sc = scene(), a = sc.audio;
+    $("#stAudioRemove").hidden = !a;
+    $("#stAudioModeRow").hidden = !a;
+    const src = el("select", { title: "Where this scene's sound comes from" },
+      el("option", { value: "", text: "None: H3 makes the sound" }),
+      ...S.scenes.filter((x) => x !== sc).map((x) =>
+        el("option", { value: x.id, text: `Scene ${sceneNo(x.id)}'s clip · ${x.title.trim() || "untitled"}` })),
+      a && !a.from ? el("option", { value: "upload", text: `Uploaded: ${a.name || "sound"}` }) : null);
+    src.value = a ? a.from || "upload" : "";
+    src.addEventListener("change", () => {
+      sc.audio = src.value && src.value !== "upload"
+        ? { mode: a?.mode || "exact", from: src.value, file: null, pod: null, output: null } : src.value ? a : null;
+      drawAudio();
+      changed();
+    });
+    const rows = [el("div", { class: "row tight st-audio-src" }, el("span", { class: "opt-k", text: "Sound" }), src)];
+    if (a) {
+      setSeg("stAudioMode", "mode", a.mode || "exact");
+      $("#stAudioModeNote").textContent = a.mode === "voices"
+        ? "Only the voices are borrowed; H3 speaks the dialogue again, so the timing can differ."
+        : "Copied as this clip's sound: H3 moves the lips and the action to it, so the angles cut together.";
+    }
+    if (a?.from) {
+      const n = sceneNo(a.from), source = S.scenes[n - 1];
+      const line = el("p", { class: "small dim", text: a.output
+        ? `Scene ${n}'s clip ${a.output.split("/").pop()}.`
+        : `Taken from scene ${n}'s finished clip when this scene is queued. Make all scenes waits for that clip.` });
+      rows.push(line);
+      if (a.output && !DEMO) rows.push(el("audio", { controls: true, preload: "none", src: `api/outputs/file?path=${encodeURIComponent(a.output)}` }));
+      if (source && Math.abs(sceneSeconds(source) - sceneSeconds(sc)) > 0.01) {
+        rows.push(el("p", { class: "small warn-note", text: `Scene ${n} is ${sceneSeconds(source)} s and this one ${sceneSeconds(sc)} s: keep the same shot lengths so the sound lines up.` }));
+      }
+      if (source && dialogue(source) !== dialogue(sc)) {
+        rows.push(el("p", { class: "small warn-note", text: `The dialogue differs from scene ${n}. Keep the same lines (the camera can change).` }));
+      }
+      // which take, once scene n has more than one finished
+      madeClips(a.from).then(({ made }) => {
+        if (made.length < 2 || sc !== scene()) return;
+        const pick = el("select", { title: "Which take's sound" },
+          el("option", { value: "", text: "the first finished take" }),
+          ...made.map((m, k) => el("option", { value: m.path, text: `take ${k + 1} · seed ${m.seed} · ${m.path.split("/").pop()}` })));
+        pick.value = made.some((m) => m.path === a.output) ? a.output : "";
+        pick.addEventListener("change", () => { Object.assign(a, { output: pick.value || null, file: null, pod: null }); drawAudio(); changed(); });
+        line.after(el("div", { class: "row tight st-audio-src" }, el("span", { class: "opt-k", text: "Take" }), pick));
+      }).catch(() => {});
+    } else if (a) {
+      const url = a.file && audioUrls.get(a.file);
+      rows.push(el("p", { class: "small dim", text: [a.name, a.duration && `${a.duration.toFixed(2)} s`, a.busy ? "uploading…" : "<Audio 1>"].filter(Boolean).join(" · ") }));
+      if (url) rows.push(el("audio", { controls: true, preload: "metadata", src: url }));
+      if (a.duration && Math.abs(a.duration - sceneSeconds(sc)) > 0.25) {
+        rows.push(el("p", { class: "small warn-note", text: `The sound is ${a.duration.toFixed(1)} s and the scene ${sceneSeconds(sc)} s; it is cut to the scene's length.` }));
+      }
+    } else {
+      rows.push(el("p", { class: "small dim", text: "For a second camera on the same dialogue, use + Another angle: that scene takes this one's sound, so both clips have the same voices and timing." }));
+    }
+    $("#stAudio").replaceChildren(...rows);
+  }
+
+  async function setAudioUpload(f) {
+    const sc = scene();
+    const url = URL.createObjectURL(f);
+    const duration = await mediaDuration(url);
+    sc.audio = { mode: sc.audio?.mode || "exact", from: null, file: null, pod: null, name: f.name, duration, busy: true };
+    drawAudio();
+    try {
+      const file = await upload(f);
+      audioUrls.set(file, url);
+      Object.assign(sc.audio, { file, pod: pod() });
+      delete sc.audio.busy;
+      msg("The sound is in. It goes to H3 as <Audio 1>.");
+    } catch (e) {
+      sc.audio = null;
+      URL.revokeObjectURL(url);
+      msg(/unsupported file type/.test(e.message)
+        ? "This pod's image cannot take a sound file yet: start the pod from the latest Shopee ComfyPod image."
+        : `${f.name}: ${e.message}`);
+    }
+    if (sc === scene()) drawAudio();
+    changed();
+  }
+
+  // a second camera on the scene that is open: the same shots, lines and seconds, its sound taken
+  // from that scene's finished clip; an angle of an angle shares the first one's sound
+  function addAngle() {
+    const src = scene();
+    const root = src.audio?.from && src.audio.mode !== "voices" ? src.audio.from : src.id;
+    const twin = JSON.parse(JSON.stringify(src));
+    const n = S.scenes.filter((x) => x.audio?.from === root).length + 2;
+    const base = (S.scenes.find((x) => x.id === root)?.title || src.title).trim() || `Scene ${sceneNo(root)}`;
+    Object.assign(twin, {
+      id: uid(), title: `${base} · angle ${n}`, blocking: null, frames: { start: null, end: null },
+      audio: { mode: "exact", from: root, file: null, pod: null, output: null },
+    });
+    delete twin.state;
+    for (const s of twin.shots) {
+      s.id = uid();
+      if (s.move === "blocking") s.move = "static";
+    }
+    S.scenes.splice(S.at + 1, 0, twin);
+    goScene(S.at + 1);
+    msg(`Scene ${S.at + 1} is angle ${n} of scene ${sceneNo(root)}: change each shot's camera, keep the dialogue and the seconds. It takes scene ${sceneNo(root)}'s sound once that clip is made.`);
+  }
+
   function drawScene() {
     const sc = scene();
     $("#stSceneNo").textContent = String(S.at + 1);
@@ -524,6 +678,7 @@
     $("#stSceneSound").placeholder = trim(S.music) || "Ambient sound that matches the setting";
     $("#stDelScene").hidden = S.scenes.length < 2;
     drawFrames();
+    drawAudio();
     drawBlocking();
     drawShots();
   }
@@ -659,6 +814,7 @@
     if (cast) { drawCast(); drawPlace(); drawShots(); }
     // an edited scene is no longer the one that was queued
     if (scene().state) { delete scene().state; drawScenes(); }
+    if (scene().audio?.from) drawAudio();
     drawLength();
     drawPreview();
     save();
@@ -741,6 +897,40 @@ s.render.filepath = "//blocking_scene${n}_"
 
   /* ---------------- making ---------------- */
 
+  // a scene's <Audio 1> as a file on this pod. Another scene's clip is copied in once it is
+  // finished; until then the error carries `wait`, and the scene is tried again with the others.
+  async function audioFile(sc) {
+    const a = sc.audio;
+    if (!a) return null;
+    if (a.busy) throw new Error("its sound is still uploading");
+    if (a.file && (a.pod === pod() || DEMO)) return a.file;
+    if (!a.from) {
+      const url = a.file && audioUrls.get(a.file);
+      if (!url) throw new Error("its sound file is on another pod: upload it again");
+      const blob = await (await fetch(url)).blob();
+      a.file = await upload(new File([blob], a.name || "sound.wav", { type: blob.type }));
+      a.pod = pod();
+      audioUrls.set(a.file, url);
+      save();
+      return a.file;
+    }
+    const n = sceneNo(a.from);
+    if (!n) throw new Error("the scene it takes its sound from was deleted");
+    const { made, busy } = await madeClips(a.from);
+    const path = made.find((m) => m.path === a.output)?.path || made[0]?.path;
+    if (!path) {
+      if (!busy) throw new Error(`make scene ${n} first: this scene takes its sound from that clip`);
+      const e = new Error(`scene ${n}'s clip is not finished yet`);
+      e.wait = true;
+      throw e;
+    }
+    const r = await api("beginner/ref-from-output", { path });
+    Object.assign(a, { file: r.filename, pod: pod(), output: path });
+    save();
+    if (sc === scene()) drawAudio();
+    return a.file;
+  }
+
   async function requestFor(sc, i) {
     const seconds = sceneSeconds(sc);
     if (seconds > MAX_SECONDS) throw new Error(`it is ${seconds} s; H3 makes up to ${MAX_SECONDS} s`);
@@ -749,6 +939,7 @@ s.render.filepath = "//blocking_scene${n}_"
     const blk = sc.blocking;
     if (blk?.busy) throw new Error("its blocking video is still uploading");
     if (blk?.file && blk.pod && blk.pod !== pod() && !DEMO) throw new Error("its blocking video is on another pod: add it again");
+    const audio = await audioFile(sc);
     const refs = [];
     for (const item of refsFor().files) refs.push(await onPod(item, item === S.place ? "place" : item.name || "character"));
     // first frame = 0, last frame = -1 (server.py counts a negative index back from the end)
@@ -760,6 +951,9 @@ s.render.filepath = "//blocking_scene${n}_"
     return {
       mode: "free", prompt: buildPrompt(sc), seconds, aspect: S.aspect, refs, keyframes,
       ref_videos: blk?.file ? [blk.file] : [],
+      ref_audios: audio ? [audio] : [],
+      // the queue hands this back, so another angle can find this scene's finished clip
+      tag: `story:${sc.id}`,
       label: `${S.title.trim() ? S.title.trim() + " · " : ""}${i + 1}. ${sc.title.trim() || `Scene ${i + 1}`}`,
       count: S.takes, hd: S.hd, fast: S.fast && !$("#stFast").disabled, sparse: true, upscale: false, loras: [],
       // stored beside the clip, so "Use this recipe" in Outputs brings the story back here
@@ -774,7 +968,7 @@ s.render.filepath = "//blocking_scene${n}_"
     return {
       ...S, at: i, place: strip(S.place), cast: S.cast.map(strip),
       scenes: S.scenes.map((sc) => ({
-        ...sc, state: undefined, blocking: strip(sc.blocking),
+        ...sc, state: undefined, blocking: strip(sc.blocking), audio: strip(sc.audio),
         frames: { start: strip(sc.frames?.start), end: strip(sc.frames?.end) },
       })),
     };
@@ -791,10 +985,11 @@ s.render.filepath = "//blocking_scene${n}_"
   // during the first boot's downloads starts the moment it can
   function waitFor(rest, why, queued) {
     const n = rest.length;
+    if (!n) return;
     // by id, not position: a scene added or deleted meanwhile must not shift which ones go
     const ids = rest.map((i) => S.scenes[i].id);
     $("#stMsg").replaceChildren(
-      `${queued ? `${queued} queued. ` : ""}Waiting for the pod: ${why}. ${n} scene${n === 1 ? "" : "s"} will queue by themselves when it is ready; keep this tab open. `,
+      `${queued ? `${queued} queued. ` : ""}Waiting: ${why}. ${n === 1 ? "1 scene will queue by itself" : `${n} scenes will queue by themselves`} when ready; keep this tab open. `,
       el("button", { class: "link", type: "button", onclick: () => {
         stopWaiting();
         msg("Stopped waiting. Make all scenes queues them when you are ready.");
@@ -802,11 +997,27 @@ s.render.filepath = "//blocking_scene${n}_"
     waitTimer = setTimeout(() => makeScenes(ids.map((id) => S.scenes.findIndex((sc) => sc.id === id)).filter((i) => i >= 0)), RETRY_MS);
   }
 
+  // a scene that takes its sound from another one in the same run goes after it
+  function sourcesFirst(indexes) {
+    const out = [], seen = new Set();
+    const visit = (i) => {
+      if (seen.has(i)) return;
+      seen.add(i);
+      const j = S.scenes.findIndex((x) => x.id === S.scenes[i].audio?.from);
+      if (j >= 0 && indexes.includes(j)) visit(j);
+      out.push(i);
+    };
+    indexes.forEach(visit);
+    return out;
+  }
+
   async function makeScenes(indexes) {
     stopWaiting();
     $("#stStart").disabled = $("#stAll").disabled = true;
     msg("");
-    let queued = 0;
+    let queued = 0, why = "";
+    const later = [];
+    indexes = sourcesFirst(indexes);
     try {
       for (const [pos, i] of indexes.entries()) {
         const sc = S.scenes[i];
@@ -815,13 +1026,26 @@ s.render.filepath = "//blocking_scene${n}_"
           queued += r.jobs?.length || S.takes;
           sc.state = "queued";
         } catch (e) {
-          if (NOT_READY.test(e.message)) return waitFor(indexes.slice(pos), e.message, queued);
+          // the pod is not ready: everything left waits; an angle whose source clip is not
+          // finished: only it waits, the others still go
+          if (NOT_READY.test(e.message)) {
+            later.push(...indexes.slice(pos));
+            why = `the pod (${e.message})`;
+            break;
+          }
+          if (e.wait) {
+            later.push(i);
+            why = why || e.message;
+            sc.state = "waiting";
+            continue;
+          }
           sc.state = "failed";
           throw new Error(`Scene ${i + 1}: ${e.message}`);
         } finally {
           drawScenes();
         }
       }
+      if (later.length) return waitFor(later, why, queued);
       msg(`Queued ${queued} clip${queued === 1 ? "" : "s"}. ${indexes.length > 1 ? "The scenes run one after another" : "It shows up"} in the Queue, then in Outputs.`);
       A.genPoll();
     } catch (e) {
@@ -845,6 +1069,7 @@ s.render.filepath = "//blocking_scene${n}_"
       place: keep(st.place), cast: (st.cast || []).map(keep),
       scenes: (st.scenes || []).map((sc) => ({
         ...sc, blocking: sc.blocking && { ...sc.blocking, pod: here },
+        audio: sc.audio && { ...sc.audio, pod: here },
         frames: { start: keep(sc.frames?.start), end: keep(sc.frames?.end) },
       })),
     }));
@@ -878,6 +1103,8 @@ s.render.filepath = "//blocking_scene${n}_"
   const FILE_FORMAT = "aiangel-story";
   const VIDEO_EXT = /\.(mp4|mov|webm|mkv)$/i;  // server.py ALLOWED_VIDEO_EXT
   const IMAGE_EXT = /\.(png|jpe?g|webp)$/i;    // server.py ALLOWED_REF_EXT
+  const AUDIO_TYPES = { ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".flac": "audio/flac",
+    ".ogg": "audio/ogg", ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mkv": "video/x-matroska" };
 
   const CRC = (() => {
     const t = new Uint32Array(256);
@@ -994,6 +1221,21 @@ s.render.filepath = "//blocking_scene${n}_"
         missing.push(i + 1);
         sc.blocking = null;
       }
+      const aud = S.scenes[i].audio;
+      if (aud && !aud.from) {
+        const aurl = aud.file && audioUrls.get(aud.file);
+        if (aurl) {
+          const ext = (/\.\w+$/.exec(aud.name || "")?.[0] || ".wav").toLowerCase();
+          sc.audio.path = add(`audio/scene-${i + 1}-${safeName((aud.name || "").replace(/\.\w+$/, ""), "sound")}${ext}`, await bytes(aurl));
+          Object.assign(sc.audio, { file: null, pod: null });
+        } else {
+          missing.push(`${i + 1} (sound)`);
+          sc.audio = null;
+        }
+      } else if (aud) {
+        // another scene's clip: made again on the pod the story goes to
+        Object.assign(sc.audio, { file: null, pod: null, output: null });
+      }
       add(`prompts/scene-${i + 1}.txt`, new TextEncoder().encode(buildPrompt(S.scenes[i])));
     }
     const enc = new TextEncoder();
@@ -1026,11 +1268,12 @@ s.render.filepath = "//blocking_scene${n}_"
         data,
         photo: (x) => blob(x?.photo, /\.png$/i.test(x?.photo || "") ? "image/png" : /\.webp$/i.test(x?.photo || "") ? "image/webp" : "image/jpeg"),
         video: (sc) => blob(sc.blocking?.video, /\.webm$/i.test(sc.blocking?.video || "") ? "video/webm" : "video/mp4"),
+        audio: (sc) => blob(sc.audio?.path, AUDIO_TYPES[(/\.\w+$/.exec(sc.audio?.path || "")?.[0] || "").toLowerCase()] || "audio/wav"),
       };
     }
     const data = JSON.parse(await f.text());
     const inline = async (src) => (src ? (await fetch(src)).blob() : null);
-    return { data, photo: (x) => inline(x?.thumb), video: (sc) => inline(data.videos?.[sc.id]) };
+    return { data, photo: (x) => inline(x?.thumb), video: (sc) => inline(data.videos?.[sc.id]), audio: () => null };
   }
 
   async function importStory(f) {
@@ -1052,7 +1295,9 @@ s.render.filepath = "//blocking_scene${n}_"
     const problems = [];
     const photos = new Map(), videos = new Map();
     for (const x of [st.place, ...(st.cast || []), ...frameItems(st)]) if (x) photos.set(x, await pack.photo(x));
+    const sounds = new Map();
     for (const sc of st.scenes) if (sc.blocking) videos.set(sc, await pack.video(sc));
+    for (const sc of st.scenes) if (sc.audio && !sc.audio.from) sounds.set(sc, await pack.audio(sc));
 
     S = Object.assign(blank(), st, { at: 0 });
     for (const x of [S.place, ...S.cast, ...frameItems(S)]) {
@@ -1076,6 +1321,11 @@ s.render.filepath = "//blocking_scene${n}_"
       if (blob) Object.assign(sc.blocking, { file: null, pod: null, busy: true, blob });
       else sc.blocking = null;
       if (sc.blocking) delete sc.blocking.video;
+      const sound = sc.audio && !sc.audio.from && sounds.get(sc);
+      if (sc.audio?.from) Object.assign(sc.audio, { file: null, pod: null, output: null });
+      else if (sound) Object.assign(sc.audio, { file: null, pod: null, busy: true, blob: sound });
+      else sc.audio = null;
+      if (sc.audio) delete sc.audio.path;
     }
     if (!S.scenes.length) S.scenes = [newScene(1)];
     drawAll();
@@ -1102,6 +1352,22 @@ s.render.filepath = "//blocking_scene${n}_"
       }
       drawScenes();
       if (sc === scene()) drawScene();
+    }
+    for (const [i, sc] of S.scenes.entries()) {
+      const a = sc.audio;
+      if (!a?.blob) continue;
+      const blob = a.blob;
+      delete a.blob;
+      msg(`Uploading the sound of scene ${i + 1}…`);
+      try {
+        const file = await upload(new File([blob], a.name || `scene${i + 1}.wav`, { type: blob.type }));
+        audioUrls.set(file, URL.createObjectURL(blob));
+        Object.assign(a, { file, pod: pod() });
+        delete a.busy;
+      } catch (e) {
+        sc.audio = null;
+        problems.push(`scene ${i + 1}'s sound: ${e.message}`);
+      }
     }
     msg("Uploading the pictures…");
     for (const x of [S.place, ...S.cast, ...frameItems(S)]) {
@@ -1222,15 +1488,33 @@ s.render.filepath = "//blocking_scene${n}_"
     goScene(S.at + 1);
     $("#stSceneTitle").select();
   });
+  $("#stAngle").addEventListener("click", addAngle);
+  $("#stAudioUpload").addEventListener("click", () => $("#stAudioFile").click());
+  $("#stAudioFile").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (f) setAudioUpload(f);
+  });
+  $("#stAudioRemove").addEventListener("click", () => { scene().audio = null; drawAudio(); changed(); });
+  $$("#stAudioMode button").forEach((b) => b.addEventListener("click", () => {
+    if (!scene().audio) return;
+    scene().audio.mode = b.dataset.mode;
+    drawAudio();
+    changed();
+  }));
+
   $("#stDupScene").addEventListener("click", () => {
     const twin = JSON.parse(JSON.stringify(scene()));
     Object.assign(twin, { id: uid(), title: `${twin.title} (copy)` });
+    if (twin.audio?.from === scene().id) twin.audio = null;
     delete twin.state;
     S.scenes.splice(S.at + 1, 0, twin);
     goScene(S.at + 1);
   });
   $("#stDelScene").addEventListener("click", () => {
-    if (S.scenes.length < 2 || !confirm(`Delete scene ${S.at + 1}?`)) return;
+    const angles = S.scenes.filter((x) => x.audio?.from === scene().id).length;
+    if (S.scenes.length < 2 || !confirm(`Delete scene ${S.at + 1}?${angles ? ` ${angles} other angle${angles > 1 ? "s take" : " takes"} its sound and will have none.` : ""}`)) return;
+    for (const x of S.scenes) if (x.audio?.from === scene().id) x.audio = null;
     S.scenes.splice(S.at, 1);
     goScene(Math.max(0, S.at - 1));
   });

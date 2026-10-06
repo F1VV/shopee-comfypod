@@ -374,6 +374,23 @@
     "The clip opens or ends exactly on these pictures. Describe the first and last shot to match them.": "คลิปจะเปิดหรือปิดด้วยภาพเหล่านี้พอดี เขียนช็อตแรกและช็อตสุดท้ายให้ตรงกับภาพ",
     "Leave them empty and H3 designs the shot from the text. A Blender render, a still from an earlier clip, or a picture from the Create tab works.": "เว้นว่างไว้ H3 จะออกแบบช็อตจากข้อความเอง ใช้ภาพ render จาก Blender ภาพนิ่งจากคลิปก่อนหน้า หรือรูปจากแท็บสร้างก็ได้",
 
+    // Story tab: angles and dialogue sound
+    "+ Another angle": "+ อีกมุมกล้อง",
+    "Dialogue sound": "เสียงบทสนทนา",
+    "optional · goes to H3 as <Audio 1>": "ไม่ใส่ก็ได้ · ส่งให้ H3 เป็น <Audio 1>",
+    "+ Upload sound": "+ อัปโหลดเสียง",
+    "Use it as": "ใช้เป็น",
+    "Exact sound (lip-sync)": "เสียงเดิมทุกอย่าง (ลิปซิงก์)",
+    "Same voices only": "ใช้แค่น้ำเสียง",
+    "None: H3 makes the sound": "ไม่มี: ให้ H3 สร้างเสียงเอง",
+    "the first finished take": "เทคแรกที่เสร็จ",
+    "Take": "เทค",
+    "Only the voices are borrowed; H3 speaks the dialogue again, so the timing can differ.": "ยืมแค่น้ำเสียง H3 จะพูดบทใหม่ จังหวะจึงอาจต่างไป",
+    "Copied as this clip's sound: H3 moves the lips and the action to it, so the angles cut together.": "ใช้เป็นเสียงของคลิปนี้ตรง ๆ H3 จะขยับปากและท่าทางตามเสียง ตัดสลับมุมกันได้พอดี",
+    "For a second camera on the same dialogue, use + Another angle: that scene takes this one's sound, so both clips have the same voices and timing.": "ถ้าต้องการกล้องตัวที่สองในบทสนทนาเดียวกัน กด + อีกมุมกล้อง ฉากนั้นจะใช้เสียงของฉากนี้ ทั้งสองคลิปจึงได้เสียงและจังหวะเดียวกัน",
+    "The sound is in. It goes to H3 as <Audio 1>.": "ใส่เสียงแล้ว ส่งให้ H3 เป็น <Audio 1>",
+    "This pod's image cannot take a sound file yet: start the pod from the latest Shopee ComfyPod image.": "อิมเมจของ pod นี้ยังรับไฟล์เสียงไม่ได้ ให้เปิด pod จากอิมเมจ Shopee ComfyPod ล่าสุด",
+
     // Shopee affiliate tab (shopee.js, added for this workspace)
     "Shopee affiliate": "คลิป Shopee Affiliate",
     "Product photos and a few words in, a vertical clip out: a hook, the product working, and a call to the basket, spoken in Thai.":
@@ -579,10 +596,19 @@
     [/^Uploading the blocking video of scene (\d+)…$/, "กำลังอัปโหลดวิดีโอ blocking ของฉาก $1…"],
     [/^Imported (.+): (\d+) scenes?\.$/, "นำเข้า $1 แล้ว: $2 ฉาก"],
     [/^(.+) is not a story file exported from this tab\.$/, "$1 ไม่ใช่ไฟล์เรื่องที่ส่งออกจากแท็บนี้"],
-    [/^(?:(\d+) queued\. )?Waiting for the pod: (.+)\. (\d+) scenes? will queue by themselves when it is ready; keep this tab open\.$/, "กำลังรอ pod: $2 อีก $3 ฉากจะเข้าคิวเองเมื่อพร้อม อย่าปิดแท็บนี้"],
     // Story tab: start and end frames
     [/^Use scene (\d+)'s last frame$/, "ใช้ภาพสุดท้ายของฉาก $1"],
     [/^The (first|last) frame is (\d+)×(\d+); its edges outside ([\d:]+) are cut off, as shown\.$/, "ภาพนี้ขนาด $2×$3 ขอบที่เกิน $4 จะถูกตัดออกตามที่เห็น"],
+    // Story tab: angles and dialogue sound
+    [/^Scene (\d+)'s clip · (.+)$/, "คลิปของฉาก $1 · $2"],
+    [/^Uploaded: (.+)$/, "อัปโหลดแล้ว: $1"],
+    [/^Taken from scene (\d+)'s finished clip when this scene is queued\. Make all scenes waits for that clip\.$/, "จะใช้เสียงจากคลิปที่เสร็จแล้วของฉาก $1 ตอนเข้าคิว กด ทำทั้งหมด จะรอคลิปนั้นให้เอง"],
+    [/^Scene (\d+)'s clip (.+)\.$/, "คลิปของฉาก $1: $2"],
+    [/^Scene (\d+) is ([\d.]+) s and this one ([\d.]+) s: keep the same shot lengths so the sound lines up\.$/, "ฉาก $1 ยาว $2 วิ ฉากนี้ $3 วิ ตั้งความยาวช็อตให้เท่ากัน เสียงจะได้ตรง"],
+    [/^The dialogue differs from scene (\d+)\. Keep the same lines \(the camera can change\)\.$/, "บทพูดไม่ตรงกับฉาก $1 ใช้บทเดิม (เปลี่ยนแค่กล้อง)"],
+    [/^Scene (\d+) is angle (\d+) of scene (\d+): change each shot's camera, keep the dialogue and the seconds\. It takes scene (\d+)'s sound once that clip is made\.$/, "ฉาก $1 คือมุมที่ $2 ของฉาก $3 เปลี่ยนกล้องของแต่ละช็อต แต่คงบทพูดและความยาวไว้ จะใช้เสียงของฉาก $4 เมื่อคลิปนั้นเสร็จ"],
+    [/^(?:(\d+) queued\. )?Waiting: (.+)\. (\d+) scenes? will queue by (?:itself|themselves) when ready; keep this tab open\.$/, "กำลังรอ: $2 อีก $3 ฉากจะเข้าคิวเองเมื่อพร้อม อย่าปิดแท็บนี้"],
+    [/^Uploading the sound of scene (\d+)…$/, "กำลังอัปโหลดเสียงของฉาก $1…"],
   ];
 
   const PH = {  // placeholders
