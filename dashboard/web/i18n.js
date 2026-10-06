@@ -401,6 +401,8 @@
     "+ New location photo…": "+ รูปสถานที่ใหม่…",
     "A photo of the place keeps it the same in every scene and angle that uses it.": "รูปสถานที่ช่วยให้ทุกฉากและทุกมุมกล้องที่ใช้รูปนี้ เห็นสถานที่เดียวกัน",
 
+    "demo sample: no file": "ตัวอย่างในโหมดเดโม: ไม่มีไฟล์จริง",
+
     // Shopee affiliate tab (shopee.js, added for this workspace)
     "Shopee affiliate": "คลิป Shopee Affiliate",
     "Product photos and a few words in, a vertical clip out: a hook, the product working, and a call to the basket, spoken in Thai.":

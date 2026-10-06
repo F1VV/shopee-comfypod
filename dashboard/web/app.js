@@ -373,7 +373,8 @@
         el("span", { class: "tname", title: f.path, text: name }),
         el("button", { class: "link", type: "button", text: "Use this recipe", onclick: () => useRecipe(f.path) }),
         make720Button(f, v, { class: "link", onclick: () => make720(f.path) }),
-        el("a", { class: "link", href: fileUrl(f.path, true), download: name, text: "Download" })));
+        DEMO ? el("span", { class: "small dim", text: "demo sample: no file" })
+          : el("a", { class: "link", href: fileUrl(f.path, true), download: name, text: "Download" })));
   }
 
   function tile(f, small = false) {

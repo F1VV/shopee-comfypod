@@ -838,14 +838,29 @@ def _in_flight_since(cfg: Config) -> float | None:
     right name, long before it holds a whole video. Anything newer than a running job belongs to
     that job and is not safe to hand out yet: a download taken then returns a few dozen bytes of
     mp4 header with no error at all, which reads as a corrupt clip rather than as too early.
+
+    Only a job ComfyUI has started can be writing; one still waiting in the queue has written
+    nothing. Counting a waiting job by the time it was queued hid every clip finished after a long
+    queue was sent (the Story tab's "Make all scenes", 76 clips at once) behind a 409 until the
+    whole queue drained. If the start of the running job was missed (the progress websocket
+    reconnecting), anything newer than the last finished job may be its file, so that is the
+    line; without the progress websocket there are no start times and every live job counts.
     """
     with cfg.gen_lock:
         live = [j for j in cfg.gen_jobs if j["state"] in ("queued", "running")]
+        finished = [j["finished"] for j in cfg.gen_jobs if j.get("finished") is not None]
     if not live:
         return None
-    return min(
-        (cfg.progress.get(j["prompt_id"]) or {}).get("started") or j["created"] for j in live
-    )
+    if not cfg.progress_ws:
+        return min(j["created"] for j in live)
+    starts = [
+        (cfg.progress.get(j["prompt_id"]) or {}).get("started")
+        for j in live
+    ]
+    starts = [t for t in starts if t is not None]
+    if starts:
+        return min(starts)
+    return max(finished) if finished else min(j["created"] for j in live)
 
 
 async def get_outputs(request: web.Request) -> web.Response:
