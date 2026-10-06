@@ -807,6 +807,7 @@ select { width: auto; padding: 7px 10px; font-family: var(--sans); }
 .st-shot-acts { margin: 0; }
 #stLook { flex-wrap: wrap; }
 #stAll { white-space: nowrap; }
+.st-pick select { padding: 4px 8px; font-size: 13px; margin-left: 6px; }
 .st-file-links { gap: 14px; margin: 0; }
 
 @media (max-width: 640px) {

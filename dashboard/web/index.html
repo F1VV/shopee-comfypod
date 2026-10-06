@@ -772,8 +772,22 @@
         <div class="render">
           <div class="render-row">
             <div class="opt toggles">
-              <label class="toggle" title="Renders at 1280×704 (or 704×1280) from the start. About 1.8x the time.">
-                <input type="checkbox" id="stHd"> <span>720p</span>
+              <label class="toggle st-pick" title="768 is H3's own size (its shorter side is 768 px by default). Larger takes longer and needs more GPU memory: a long 768 clip wants a 96 GB card.">
+                <span>Size</span>
+                <select id="stRes">
+                  <option value="576">576p · draft</option>
+                  <option value="720">720p</option>
+                  <option value="768">768p · H3 native, best</option>
+                </select>
+              </label>
+              <label class="toggle st-pick" title="The model is a turbo merge made for 8 steps. More steps take proportionally longer; whether they add detail is worth testing on one scene first.">
+                <span>Steps</span>
+                <select id="stSteps">
+                  <option value="8">8 · default</option>
+                  <option value="12">12</option>
+                  <option value="16">16</option>
+                  <option value="20">20</option>
+                </select>
               </label>
               <label class="toggle" title="Skips attention blocks a frame does not need: about 1.4x faster on long clips, with a slight loss of detail. Off gives the best picture.">
                 <input type="checkbox" id="stSparse"> <span>Faster attention</span> <em>slight quality loss</em>

@@ -408,6 +408,12 @@
     "Faster attention": "เร่งความเร็ว (attention)",
     "slight quality loss": "คุณภาพลดลงเล็กน้อย",
 
+    // Story tab: size and steps
+    "Steps": "จำนวนสเต็ป",
+    "576p · draft": "576p · ร่าง",
+    "768p · H3 native, best": "768p · ขนาดจริงของ H3 ดีที่สุด",
+    "8 · default": "8 · ค่าเริ่มต้น",
+
     // Shopee affiliate tab (shopee.js, added for this workspace)
     "Shopee affiliate": "คลิป Shopee Affiliate",
     "Product photos and a few words in, a vertical clip out: a hook, the product working, and a call to the basket, spoken in Thai.":

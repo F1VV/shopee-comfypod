@@ -163,6 +163,17 @@ sound to use. **Same voices only** borrows just the voices (the dialogue is spok
 **+ Upload sound** takes a recorded dialogue or any clip instead. Keep both angles' shot lengths and
 lines the same; the scene box warns when they drift apart.
 
+## Story tab: size, steps and quality
+
+- **Size**: 576p (draft), 720p (704×1280), or **768p, H3's own size** (768×1376; the MiniMax-H3
+  model card sets the shorter side to 768 px by default). A new story starts at 768p. A long 768p
+  clip wants a 96 GB card; if the Queue shows out-of-memory errors, pick 720p.
+- **Steps**: 8 by default. AiAngelH3 is a turbo merge made for 8 steps, so 12, 16 or 20 take
+  proportionally longer and may or may not add detail: try one scene before a whole episode.
+- **Faster attention** (sparse attention) is off unless ticked, and **Fast** is off.
+- The biggest single factor for faces is the character picture: one clear, high-resolution,
+  single-person portrait per character works much better than a multi-panel character sheet.
+
 ## Story tab: blocking videos from Blender
 
 1. Block the scene with simple shapes or mannequins, give each character its own colour, and

@@ -589,6 +589,13 @@ def _image_needs(cfg: Config) -> dict[str, list[str]]:
 # "make this 720p" is a re-run, not a post-process (measured 2026-09-15; x1.875 runs out of memory
 # on a 96 GB card for a 10 s clip).
 UPSCALE_720P = 1.25
+# H3's own output size: "the shorter side is set to 768 pixels by default" (MiniMax-H3 model
+# card), on the 32 px grid. The 576 and 720 sizes above it are speed choices made for this
+# template; this is the size the model itself makes. 1:1 takes the largest square that costs
+# about what 9:16 does.
+NATIVE_SIZES = {"9:16": (768, 1376), "16:9": (1376, 768), "1:1": (1024, 1024)}
+# sampling steps a request may ask for instead of the model's own (8, or 4 with Fast)
+STEPS_MIN, STEPS_MAX = 4, 40
 # The 720p checkbox renders natively at this size instead (owner 2026-09-17, after a side-by-side:
 # native 720p looked best). 147 s vs 135 s for the upscale route on a 10 s two-person clip, but it
 # is a different clip from the 576p one, so "Make it 720p" on a finished clip keeps the upscale.
@@ -1761,6 +1768,22 @@ def _clip_plan(cfg: Config, body: dict, *, runnable: bool) -> dict:
     sparse = body.get("sparse") is not False
     if hd and upscale:
         raise BadRequest("pick one: native 720p (hd) or the 720p upscale of a 576p clip")
+    # "res": "576" | "720" | "768"; absent = the hd flag decides, as before
+    res = str(body.get("res") or "")
+    if res not in ("", "576", "720", "768"):
+        raise BadRequest("res must be 576, 720 or 768")
+    native = res == "768"
+    hd = hd or res == "720"
+    if native and (hd or upscale):
+        raise BadRequest("768 is a size of its own: leave 720p and the upscale off")
+    steps = None
+    if body.get("steps") not in (None, ""):
+        try:
+            steps = int(body.get("steps"))
+        except (TypeError, ValueError):
+            raise BadRequest("steps must be a whole number") from None
+        if not STEPS_MIN <= steps <= STEPS_MAX:
+            raise BadRequest(f"steps must be {STEPS_MIN} to {STEPS_MAX}")
     if runnable and upscale and not _upscale_ready(cfg):
         raise BadRequest(
             "720p needs the H3 latent upscaler: add h3upscaler to MODELS and restart"
@@ -1774,14 +1797,16 @@ def _clip_plan(cfg: Config, body: dict, *, runnable: bool) -> dict:
         raise BadRequest(str(e)) from None
 
     normal, big = h3_workflows.SIZES[aspect]
-    width, height = big if hd else normal
+    width, height = NATIVE_SIZES[aspect] if native else big if hd else normal
     shape = aspect.replace(":", "x")
     # 9:16 keeps the names clips always had; "-720p_" stays last, the Outputs tab looks for it
     prefix = (
         f"AiAngel/aiangelh3{'' if aspect == '9:16' else '-' + shape}"
-        f"{'-720p' if upscale or hd else ''}"
+        f"{'-720p' if upscale or hd else '-768p' if native else ''}"
     )
     settings = h3_workflows.AIANGEL_FAST if fast else h3_workflows.AIANGEL
+    if steps is not None:
+        settings = {**settings, "steps": steps}
     chain = (list(h3_workflows.FAST_LORAS) if fast else []) + loras
 
     def graph(seed_: int) -> dict:
@@ -1810,6 +1835,8 @@ def _clip_plan(cfg: Config, body: dict, *, runnable: bool) -> dict:
             "seconds": prompt_build.clip_seconds(seconds),
             "aspect": aspect,
             "hd": hd,
+            "res": "768" if native else "720" if hd or upscale else "576",
+            "steps": settings["steps"],
             "fast": fast,
             "sparse": sparse,
             "upscale": upscale,
@@ -1839,6 +1866,8 @@ def _clip_plan(cfg: Config, body: dict, *, runnable: bool) -> dict:
                 "seconds": seconds,
                 "upscale": upscale,
                 "hd": hd,
+                "res": "768" if native else None,
+                "steps": steps,
                 "fast": fast,
                 "sparse": sparse,
                 "aspect": aspect,

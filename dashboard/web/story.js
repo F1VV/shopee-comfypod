@@ -83,7 +83,7 @@
   });
   const blank = () => ({
     title: "", logline: "", where: "", when: "", look: "film", lookText: "", aspect: "16:9",
-    music: "", takes: 1, hd: true, fast: false, sparse: false,
+    music: "", takes: 1, res: "768", steps: 8, fast: false, sparse: false,
     place: null,  // {file, pod, thumb, what}: the story's own place, for scenes without a location
     // Location photos, each stored once however many scenes use it (a story's scenes would
     // otherwise copy the same picture into localStorage dozens of times). {id, what, name, file, pod, thumb}
@@ -119,7 +119,16 @@
     return st;
   };
 
-  let S = settle(Object.assign(blank(), loadJson(KEY, {})));
+  // a story saved before Size and Steps existed: its 720p box becomes the 720 size. Runs on the
+  // saved object itself, before the defaults are merged in, so an old choice is not lost.
+  const sizeOf = (st) => {
+    if (!st) return st;
+    if (!["576", "720", "768"].includes(st.res) && typeof st.hd === "boolean") st.res = st.hd ? "720" : "576";
+    delete st.hd;
+    if (st.steps !== undefined && ![8, 12, 16, 20].includes(Number(st.steps))) delete st.steps;
+    return st;
+  };
+  let S = settle(Object.assign(blank(), sizeOf(loadJson(KEY, {}))));
   if (!S.scenes.length) S.scenes = [newScene(1)];
   S.at = Math.min(S.at || 0, S.scenes.length - 1);
   const scene = () => S.scenes[S.at];
@@ -905,7 +914,8 @@
     setSeg("stAspect", "aspect", S.aspect);
     setSeg("stLook", "look", S.look);
     setSeg("stTakes", "takes", S.takes);
-    $("#stHd").checked = S.hd;
+    $("#stRes").value = S.res;
+    $("#stSteps").value = String(S.steps);
     $("#stSparse").checked = S.sparse === true;
     const needsFast = (A.needs().fast || []).length > 0;
     $("#stFast").disabled = needsFast;
@@ -1068,7 +1078,9 @@ s.render.filepath = "//blocking_scene${n}_"
       tag: `story:${sc.id}`,
       label: `${S.title.trim() ? S.title.trim() + " · " : ""}${i + 1}. ${sc.title.trim() || `Scene ${i + 1}`}`,
       // sparse attention only when asked for: it is faster on long clips, at a small cost in detail
-      count: S.takes, hd: S.hd, fast: S.fast && !$("#stFast").disabled, sparse: S.sparse === true, upscale: false, loras: [],
+      count: S.takes, res: S.res, hd: S.res === "720", fast: S.fast && !$("#stFast").disabled,
+      // the model's own steps unless more were asked for (8, or 4 with Fast)
+      steps: S.steps !== 8 ? S.steps : undefined, sparse: S.sparse === true, upscale: false, loras: [],
       // stored beside the clip, so "Use this recipe" in Outputs brings the story back here
       form: { story: snapshot(i) },
     };
@@ -1178,7 +1190,7 @@ s.render.filepath = "//blocking_scene${n}_"
     const here = pod();
     // the recipe names files on the pod it was made on; they show here through refUrl
     const keep = (x) => x && { ...x, pod: here, thumb: x.file && !DEMO ? A.refUrl(x.file) : null };
-    S = settle(Object.assign(blank(), st, {
+    S = settle(Object.assign(blank(), sizeOf({ ...st }), {
       place: keep(st.place), cast: (st.cast || []).map(keep), locations: (st.locations || []).map(keep),
       scenes: (st.scenes || []).map((sc) => ({
         ...sc, blocking: sc.blocking && { ...sc.blocking, pod: here },
@@ -1417,7 +1429,7 @@ s.render.filepath = "//blocking_scene${n}_"
     for (const sc of st.scenes) if (sc.blocking) videos.set(sc, await pack.video(sc));
     for (const sc of st.scenes) if (sc.audio && !sc.audio.from) sounds.set(sc, await pack.audio(sc));
 
-    S = Object.assign(blank(), st, { at: 0 });
+    S = Object.assign(blank(), sizeOf(st), { at: 0 });
     S.locations = S.locations || [];
     for (const x of [S.place, ...S.cast, ...S.locations, ...frameItems(S)]) {
       if (!x) continue;
@@ -1569,7 +1581,8 @@ s.render.filepath = "//blocking_scene${n}_"
     drawScene();
     changed();
   }));
-  $("#stHd").addEventListener("change", (e) => { S.hd = e.target.checked; save(); });
+  $("#stRes").addEventListener("change", (e) => { S.res = e.target.value; save(); });
+  $("#stSteps").addEventListener("change", (e) => { S.steps = Number(e.target.value); save(); });
   $("#stSparse").addEventListener("change", (e) => { S.sparse = e.target.checked; save(); });
   $("#stFast").addEventListener("change", (e) => { S.fast = e.target.checked; save(); });
 
