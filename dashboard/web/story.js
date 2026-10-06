@@ -83,7 +83,7 @@
   });
   const blank = () => ({
     title: "", logline: "", where: "", when: "", look: "film", lookText: "", aspect: "16:9",
-    music: "", takes: 1, hd: false, fast: false,
+    music: "", takes: 1, hd: true, fast: false, sparse: false,
     place: null,  // {file, pod, thumb, what}: the story's own place, for scenes without a location
     // Location photos, each stored once however many scenes use it (a story's scenes would
     // otherwise copy the same picture into localStorage dozens of times). {id, what, name, file, pod, thumb}
@@ -335,7 +335,6 @@
         : opens ? "[first frame to video]" : ends ? "[keyframe to video]" : "[text to video]";
     const summary = [
       `${kind} A ${/photoreal/i.test(look()) ? "photorealistic " : ""}${shape()} story scene${title}${where ? ` in ${where}` : ""}.`,
-      S.logline.trim() && `The story: ${end(S.logline.trim())}`,
       when && `It is ${when}.`,
       first && end(cap(mentions(first.what.trim()))),
     ].filter(Boolean).join(" ");
@@ -907,6 +906,7 @@
     setSeg("stLook", "look", S.look);
     setSeg("stTakes", "takes", S.takes);
     $("#stHd").checked = S.hd;
+    $("#stSparse").checked = S.sparse === true;
     const needsFast = (A.needs().fast || []).length > 0;
     $("#stFast").disabled = needsFast;
     $("#stFast").checked = S.fast && !needsFast;
@@ -1067,7 +1067,8 @@ s.render.filepath = "//blocking_scene${n}_"
       // the queue hands this back, so another angle can find this scene's finished clip
       tag: `story:${sc.id}`,
       label: `${S.title.trim() ? S.title.trim() + " · " : ""}${i + 1}. ${sc.title.trim() || `Scene ${i + 1}`}`,
-      count: S.takes, hd: S.hd, fast: S.fast && !$("#stFast").disabled, sparse: true, upscale: false, loras: [],
+      // sparse attention only when asked for: it is faster on long clips, at a small cost in detail
+      count: S.takes, hd: S.hd, fast: S.fast && !$("#stFast").disabled, sparse: S.sparse === true, upscale: false, loras: [],
       // stored beside the clip, so "Use this recipe" in Outputs brings the story back here
       form: { story: snapshot(i) },
     };
@@ -1569,6 +1570,7 @@ s.render.filepath = "//blocking_scene${n}_"
     changed();
   }));
   $("#stHd").addEventListener("change", (e) => { S.hd = e.target.checked; save(); });
+  $("#stSparse").addEventListener("change", (e) => { S.sparse = e.target.checked; save(); });
   $("#stFast").addEventListener("change", (e) => { S.fast = e.target.checked; save(); });
 
   $("#stAddCast").addEventListener("click", () => {

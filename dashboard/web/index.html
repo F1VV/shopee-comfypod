@@ -614,7 +614,7 @@
             <label class="field"><span>Where <i>English</i></span>
               <input id="stWhere" spellcheck="false" placeholder="a narrow Bangkok alley with neon signs"></label>
           </div>
-          <label class="field st-wide"><span>What it is about <i>English, one or two sentences</i></span>
+          <label class="field st-wide"><span>What it is about <i>your notes; each clip's prompt only describes that clip</i></span>
             <textarea id="stLogline" rows="2" spellcheck="false"
               placeholder="A shy student finds the street-food boy she has a crush on hiding from the rain, and finally speaks to him."></textarea></label>
           <label class="field st-wide"><span>When <i>time of day, era, weather</i></span>
@@ -774,6 +774,9 @@
             <div class="opt toggles">
               <label class="toggle" title="Renders at 1280×704 (or 704×1280) from the start. About 1.8x the time.">
                 <input type="checkbox" id="stHd"> <span>720p</span>
+              </label>
+              <label class="toggle" title="Skips attention blocks a frame does not need: about 1.4x faster on long clips, with a slight loss of detail. Off gives the best picture.">
+                <input type="checkbox" id="stSparse"> <span>Faster attention</span> <em>slight quality loss</em>
               </label>
               <label class="toggle fast" id="stFastRow" title="4 steps instead of 8: about 1.5x faster.">
                 <input type="checkbox" id="stFast"> <span>Fast</span> <em>quality drops slightly</em>

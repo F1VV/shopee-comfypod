@@ -403,6 +403,11 @@
 
     "demo sample: no file": "ตัวอย่างในโหมดเดโม: ไม่มีไฟล์จริง",
 
+    // Story tab: quality
+    "your notes; each clip's prompt only describes that clip": "บันทึกของคุณ พรอมต์ของแต่ละคลิปจะบรรยายแค่คลิปนั้น",
+    "Faster attention": "เร่งความเร็ว (attention)",
+    "slight quality loss": "คุณภาพลดลงเล็กน้อย",
+
     // Shopee affiliate tab (shopee.js, added for this workspace)
     "Shopee affiliate": "คลิป Shopee Affiliate",
     "Product photos and a few words in, a vertical clip out: a hook, the product working, and a call to the basket, spoken in Thai.":
