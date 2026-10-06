@@ -122,6 +122,15 @@ it. To prepare everything before the pod is up:
 
 Scenes run in the Queue one after another, each with its takes.
 
+## Story tab: who is in a scene
+
+A story can hold up to 16 characters, but each clip only carries the ones it uses: everyone
+`@mentioned` in its shots or speaking one of its lines. Only they get a `<Subject N>` definition
+and send their photo, numbered for that clip; the cast list dims the others while that scene is
+open. A character's **Outfit** field is for a photo in another costume (a character sheet in Thai
+dress for an episode set in 2026): when it is filled, H3 takes only the face and hair from the
+photo and dresses them as written.
+
 ## Story tab: start and end frames
 
 Each scene can be given the picture it **opens on** and the picture it **ends on**. They go to

@@ -58,7 +58,7 @@
   };
   const SHAPES = { "9:16": [576, 1024], "16:9": [1024, 576], "1:1": [768, 768] };  // h3_workflows.SIZES
   const MAX_SECONDS = 15;  // server.py CLIP_SECONDS_MAX
-  const MAX_CAST = 5;
+  const MAX_CAST = 16;  // a clip only carries the ones in it, so the story itself can hold more
   const MAX_TAKES = 4;     // server.py MAX_TAKES
   const FPS = 24;
 
@@ -211,16 +211,43 @@
   const shape = () => ({ "9:16": "vertical", "16:9": "horizontal", "1:1": "square" })[S.aspect];
   const castName = (c, i) => c.name.trim() || `Character ${i + 1}`;
 
-  // the pictures in the order H3 numbers them: the cast with a photo first, then the place
-  function refsFor() {
-    const files = [], picOf = new Map();
-    for (const c of S.cast) if (c.thumb || c.file) picOf.set(c.id, files.push(c));
+  // "@Mali" written in a shot, for a name exactly (so "@Mali" is not found inside "@Mali Jr")
+  const mentionOf = (name, flags = "gi") =>
+    new RegExp(`@${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w\\u0E00-\\u0E7F])`, flags);
+
+  // Who a scene uses: everyone @mentioned in its shots or speaking one of its lines, in story
+  // order. Only they get a <Subject N> definition and send their photo, so a story with a big cast
+  // does not put everyone into every clip (and a clip stays inside H3's 9 pictures).
+  function sceneCast(sc) {
+    let text = sc.shots.map((s) => s.what).join("\n");
+    const hit = new Set();
+    // the longest names first, and each match taken out, so "@Mali Jr" never also counts as Mali
+    const order = S.cast.map((c, i) => [castName(c, i), i]).sort((a, b) => b[0].length - a[0].length);
+    for (const [name, i] of order) {
+      if (mentionOf(name, "i").test(text)) hit.add(i);
+      text = text.replace(mentionOf(name), " ");
+    }
+    for (const s of sc.shots) {
+      for (const l of s.lines) {
+        const i = S.cast.findIndex((c) => c.id === l.who);
+        if (i >= 0 && l.text.trim()) hit.add(i);
+      }
+    }
+    return [...hit].sort((a, b) => a - b);
+  }
+
+  // the pictures in the order H3 numbers them for a scene: its cast with a photo, then the place
+  function refsFor(sc = scene()) {
+    const files = [], picOf = new Map(), cast = sceneCast(sc);
+    for (const i of cast) if (S.cast[i].thumb || S.cast[i].file) picOf.set(S.cast[i].id, files.push(S.cast[i]));
     const placePic = S.place?.thumb || S.place?.file ? files.push(S.place) : 0;
-    return { files, picOf, placePic };
+    return { files, picOf, placePic, cast };
   }
 
   function buildPrompt(sc = scene()) {
-    const { picOf, placePic } = refsFor();
+    const { picOf, placePic, cast } = refsFor(sc);
+    // story index -> this scene's <Subject N> and (SN) number
+    const slot = new Map(cast.map((i, j) => [i, j + 1]));
     const blk = sc.blocking?.file ? sc.blocking : null;
     const follow = blk?.follow || "full";
     const where = trim(sc.where) || trim(S.where);
@@ -230,41 +257,43 @@
     const anyRef = picOf.size > 0 || placePic > 0 || !!blk || !!aud;
     // who speaks in this scene, in cast order: the voices <Audio 1> stands for
     const speakers = [...new Set(sc.shots.flatMap((s) => s.lines.filter((l) => l.text.trim())
-      .map((l) => S.cast.findIndex((c) => c.id === l.who))))].filter((k) => k >= 0).sort((a, b) => a - b);
+      .map((l) => S.cast.findIndex((c) => c.id === l.who))))].filter((k) => slot.has(k)).sort((a, b) => a - b);
 
     // Who a character is called in the text. With any reference, H3 gets <Subject N> definitions
     // (as prompt_build.py does); with none it is plain text-to-video, so a character is named by
     // their own description the first time and by name after that.
     const seen = new Set();
     const call = (i) => {
-      if (anyRef) return `<Subject ${i + 1}>`;
+      if (anyRef) return `<Subject ${slot.get(i)}>`;
       const c = S.cast[i], name = castName(c, i);
-      if (seen.has(i) || !c.who.trim()) return name;
+      const about = [trim(c.who), trim(c.outfit) && `wearing ${trim(c.outfit)}`].filter(Boolean).join(", ");
+      if (seen.has(i) || !about) return name;
       seen.add(i);
-      return `${name} (${trim(c.who)})`;
+      return `${name} (${about})`;
     };
     // "@Mali" in the user's words; the longest names first, so "@Mali Jr" is not read as "@Mali"
     const mentions = (text) => {
-      const order = S.cast.map((c, i) => [castName(c, i), i]).sort((a, b) => b[0].length - a[0].length);
+      const order = cast.map((i) => [castName(S.cast[i], i), i]).sort((a, b) => b[0].length - a[0].length);
       let out = text;
-      for (const [name, i] of order) {
-        const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        out = out.replace(new RegExp(`@${esc}(?![\\w\\u0E00-\\u0E7F])`, "gi"), () => call(i));
-      }
+      for (const [name, i] of order) out = out.replace(mentionOf(name), () => call(i));
       return out;
     };
 
     const parts = [];
     if (anyRef) {
       parts.push("subject_definitions:");
-      S.cast.forEach((c, i) => {
-        const n = `<Subject ${i + 1}>`, pic = picOf.get(c.id), who = trim(c.who);
-        if (pic) {
+      for (const i of cast) {
+        const c = S.cast[i], n = `<Subject ${slot.get(i)}>`, pic = picOf.get(c.id), who = trim(c.who);
+        const outfit = trim(c.outfit);
+        if (pic && outfit) {
+          // the photo is for the face; the clothes are this story's (a sheet in another costume)
+          parts.push(`${n} is ${castName(c, i)}${who ? `, ${who},` : ""} in <Picture ${pic}>. Use <Picture ${pic}> as the exact reference for their face and hair only; they wear ${outfit}, not the clothes in <Picture ${pic}>.`);
+        } else if (pic) {
           parts.push(`${n} is ${castName(c, i)}${who ? `, ${who},` : ""} in <Picture ${pic}>. Use <Picture ${pic}> as the exact reference for their face, hair and outfit.`);
         } else {
-          parts.push(`${n} is ${castName(c, i)}${who ? `, ${who}` : ""}. No reference picture — invent their appearance and keep it the same in every shot.`);
+          parts.push(`${n} is ${castName(c, i)}${who ? `, ${who}` : ""}${outfit ? `, wearing ${outfit}` : ""}. No reference picture — invent their appearance and keep it the same in every shot.`);
         }
-      });
+      }
       if (placePic) {
         const what = trim(S.place.what) || where || "the location";
         parts.push(`The scene takes place in ${what} shown in <Picture ${placePic}>. Use <Picture ${placePic}> as the exact reference for the setting, not for anyone's face.`);
@@ -279,7 +308,7 @@
       }
       if (aud) {
         // the guide's own audio wording: a voice-timbre reference, or the complete final track
-        const who = speakers.map((k) => `<Subject ${k + 1}> (S${k + 1})`);
+        const who = speakers.map((k) => `<Subject ${slot.get(k)}> (S${slot.get(k)})`);
         parts.push(exact
           ? "<Audio 1> is the finished soundtrack of this same scene, made for another camera angle: the same dialogue, voices, timing and sounds."
           : `<Audio 1> is the voice-timbre reference for ${who.length > 1 ? `${who.slice(0, -1).join(", ")} and ${who[who.length - 1]}` : who[0] || "the speaking characters"}.`);
@@ -313,12 +342,14 @@
 
     if (anyRef) {
       parts.push("retention_analysis:");
-      S.cast.forEach((c, i) => {
-        const pic = picOf.get(c.id);
-        parts.push(pic
-          ? `<Subject ${i + 1}>: fully_preserved - face, hairstyle, skin tone and outfit from <Picture ${pic}> stay identical in every frame.`
-          : `<Subject ${i + 1}>: their invented appearance stays the same in every frame.`);
-      });
+      for (const i of cast) {
+        const c = S.cast[i], n = `<Subject ${slot.get(i)}>`, pic = picOf.get(c.id), outfit = trim(c.outfit);
+        parts.push(pic && outfit
+          ? `${n}: fully_preserved - face, hairstyle and skin tone from <Picture ${pic}> stay identical in every frame; the outfit is ${outfit}.`
+          : pic
+            ? `${n}: fully_preserved - face, hairstyle, skin tone and outfit from <Picture ${pic}> stay identical in every frame.`
+            : `${n}: their invented appearance stays the same in every frame.`);
+      }
       if (placePic) parts.push(`setting: fully_preserved - the location from <Picture ${placePic}> stays identical in every frame.`);
       if (blk) {
         parts.push({
@@ -349,9 +380,9 @@
       for (const ln of s.lines) {
         const text = ln.text.trim();
         if (!text) continue;
-        const k = Math.max(0, S.cast.findIndex((c) => c.id === ln.who));
+        const k = S.cast.findIndex((c) => c.id === ln.who);
         // (S1) names who speaks; the tagged form is the one measured to come back word for word
-        line += ` ${S.cast[k] ? call(k) : "The narrator"} says (S${k + 1}) <d>[${isThai(text) ? "Thai" : "English"}] ${text}</d>.`;
+        line += ` ${slot.has(k) ? call(k) : "The narrator"} says (S${slot.get(k) || 1}) <d>[${isThai(text) ? "Thai" : "English"}] ${text}</d>.`;
       }
       return line;
     });
@@ -361,7 +392,7 @@
 
     const speaks = sc.shots.some((s) => s.lines.some((l) => l.text.trim()));
     const voices = speaks
-      ? S.cast.map((c, i) => c.voice.trim() && `${call(i)}'s voice: ${trim(c.voice)}`).filter(Boolean) : [];
+      ? cast.map((i) => S.cast[i].voice.trim() && `${call(i)}'s voice: ${trim(S.cast[i].voice)}`).filter(Boolean) : [];
     const sound = trim(sc.sound) || trim(S.music) || "Ambient sound that matches the setting";
     parts.push("overall_soundscape:", exact
       ? "The complete audio of <Audio 1>, unchanged: the same dialogue, voices and sounds at the same moments."
@@ -389,7 +420,7 @@
   };
 
   function drawCast() {
-    const { picOf } = refsFor();
+    const { picOf } = refsFor(scene());
     $("#stCast").replaceChildren(...S.cast.map((c, i) => {
       const file = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp", hidden: true });
       file.addEventListener("change", async () => {
@@ -408,15 +439,16 @@
       pic.classList.add("st-pick");
       pic.title = c.thumb ? `Picture ${picOf.get(c.id)} · click to change` : "Add a photo of their face";
       pic.addEventListener("click", (e) => { if (!e.target.closest(".x")) file.click(); });
-      return el("div", { class: "st-member" },
+      return el("div", { class: "st-member", "data-id": c.id },
         pic, file,
         el("div", { class: "st-member-fields" },
           // the speaker lists show the name; the cast itself is not redrawn under the cursor
           input(c.name, "Name, e.g. Mali", (v) => { c.name = v; drawShots(); changed(); }, "st-name"),
           input(c.who, "Who they are, e.g. a shy Thai student, 20, in a school uniform", (v) => { c.who = v; changed(); }),
-          input(c.voice, "Voice, e.g. a soft, nervous young woman's voice", (v) => { c.voice = v; changed(); })),
+          input(c.voice, "Voice, e.g. a soft, nervous young woman's voice", (v) => { c.voice = v; changed(); }),
+          input(c.outfit || "", "Outfit, only if not the photo's: e.g. modern clothes, a white T-shirt and jeans", (v) => { c.outfit = v; changed(); })),
         el("div", { class: "st-member-acts" },
-          el("span", { class: "tag mono", title: "Speaker tag in the prompt", text: `S${i + 1}` }),
+          el("span", { class: "tag mono st-stag", title: "Speaker tag in the open scene's prompt" }),
           el("button", { class: "link", type: "button", title: "Keep in this browser for other stories", onclick: () => saveChar(c) }, "Save"),
           el("button", { class: "x", type: "button", title: "Remove from the story", onclick: () => {
             S.cast.splice(i, 1);
@@ -429,6 +461,25 @@
     }
     $("#stAddCast").hidden = S.cast.length >= MAX_CAST;
     drawSaved();
+    markCast();
+  }
+
+  // Which characters the open scene uses: their picture number and speaker tag in its prompt;
+  // the others are dimmed. Updated in place, so typing in a shot never redraws the cast fields.
+  function markCast() {
+    const { picOf, cast } = refsFor(scene());
+    const slot = new Map(cast.map((i, j) => [S.cast[i].id, j + 1]));
+    for (const row of $$("#stCast .st-member")) {
+      const id = row.dataset.id, n = picOf.get(id);
+      row.classList.toggle("off", !slot.has(id));
+      row.title = slot.has(id) ? "" : "Not in the open scene: write @Name in a shot or give them a line";
+      const tag = row.querySelector(".st-stag");
+      if (tag) tag.textContent = slot.has(id) ? `S${slot.get(id)}` : "—";
+      const thumbEl = row.querySelector(".sp-thumb");
+      let b = thumbEl?.querySelector("b");
+      if (thumbEl && n && !b) thumbEl.append(b = el("b"));
+      if (b) n ? (b.textContent = String(n)) : b.remove();
+    }
   }
 
   const savedChars = () => loadJson(CHARS_KEY, []);
@@ -681,6 +732,7 @@
     drawAudio();
     drawBlocking();
     drawShots();
+    markCast();
   }
 
   function drawShots() {
@@ -812,6 +864,7 @@
   // `cast` = picture numbers, names or the speaker lists may have changed
   function changed(cast = false) {
     if (cast) { drawCast(); drawPlace(); drawShots(); }
+    markCast();
     // an edited scene is no longer the one that was queued
     if (scene().state) { delete scene().state; drawScenes(); }
     if (scene().audio?.from) drawAudio();
@@ -941,7 +994,7 @@ s.render.filepath = "//blocking_scene${n}_"
     if (blk?.file && blk.pod && blk.pod !== pod() && !DEMO) throw new Error("its blocking video is on another pod: add it again");
     const audio = await audioFile(sc);
     const refs = [];
-    for (const item of refsFor().files) refs.push(await onPod(item, item === S.place ? "place" : item.name || "character"));
+    for (const item of refsFor(sc).files) refs.push(await onPod(item, item === S.place ? "place" : item.name || "character"));
     // first frame = 0, last frame = -1 (server.py counts a negative index back from the end)
     const keyframes = [];
     for (const [key, frame] of [["start", 0], ["end", -1]]) {

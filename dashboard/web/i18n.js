@@ -391,6 +391,9 @@
     "The sound is in. It goes to H3 as <Audio 1>.": "ใส่เสียงแล้ว ส่งให้ H3 เป็น <Audio 1>",
     "This pod's image cannot take a sound file yet: start the pod from the latest Shopee ComfyPod image.": "อิมเมจของ pod นี้ยังรับไฟล์เสียงไม่ได้ ให้เปิด pod จากอิมเมจ Shopee ComfyPod ล่าสุด",
 
+    // Story tab: per-scene cast
+    "Not in the open scene: write @Name in a shot or give them a line": "ไม่อยู่ในฉากที่เปิดอยู่: พิมพ์ @ชื่อ ในช็อต หรือให้มีบทพูด",
+
     // Shopee affiliate tab (shopee.js, added for this workspace)
     "Shopee affiliate": "คลิป Shopee Affiliate",
     "Product photos and a few words in, a vertical clip out: a hook, the product working, and a call to the basket, spoken in Thai.":
@@ -643,6 +646,8 @@
     "@Mali runs into the rain-soaked alley and stops when she sees @Ken": "ภาษาอังกฤษ เช่น @Mali runs into the rain-soaked alley and stops when she sees @Ken",
     "what happens, in English; @Name for a character": "เกิดอะไรขึ้น (ภาษาอังกฤษ) ใช้ @ชื่อ แทนตัวละคร",
     "what they say, Thai or English": "บทพูด ภาษาไทยหรืออังกฤษ",
+    // Story tab: per-scene cast
+    "Outfit, only if not the photo's: e.g. modern clothes, a white T-shirt and jeans": "ชุด (ภาษาอังกฤษ) ใส่เฉพาะถ้าไม่ใช่ชุดในรูป เช่น modern clothes, a white T-shirt and jeans",
   };
 
   const KEY = "aiangel.lang";
