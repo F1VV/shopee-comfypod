@@ -337,13 +337,14 @@
 
     // the summary carries the story, so a scene is never shot without its context
     const first = sc.shots.find((s) => s.what.trim());
-    const title = sc.title.trim() ? ` "${sc.title.trim()}"` : "";
+    // The scene's title is the user's label, never sent: a quoted "Dream · dinner 1" in the
+    // summary came back as a giant "DREAM" across the frame.
     const opens = !!sc.frames?.start, ends = !!sc.frames?.end;
     const kind = anyRef ? "[reference generation]"
       : opens && ends ? "[first and last frame to video]"
         : opens ? "[first frame to video]" : ends ? "[keyframe to video]" : "[text to video]";
     const summary = [
-      `${kind} A ${/photoreal/i.test(look()) ? "photorealistic " : ""}${shape()} story scene${title}${where ? ` in ${where}` : ""}.`,
+      `${kind} A ${/photoreal/i.test(look()) ? "photorealistic " : ""}${shape()} story scene${where ? ` in ${where}` : ""}.`,
       when && `It is ${when}.`,
       first && end(cap(mentions(first.what.trim()))),
     ].filter(Boolean).join(" ");
@@ -406,6 +407,8 @@
     });
     parts.push("detailed_description:",
       [look(), when && cap(when), `${shape()} ${S.aspect}`].filter(Boolean).join(", ") + ".",
+      // titles and captions are added in editing; H3 is told so, since it will letter words it reads
+      "No on-screen text, titles, captions or subtitles anywhere in the frame.",
       ...shots, "");
 
     const speaks = sc.shots.some((s) => s.lines.some((l) => l.text.trim()));
