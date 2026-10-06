@@ -79,11 +79,15 @@
     // same dialogue) or an uploaded sound file; `mode` "exact" copies it as the clip's sound,
     // "voices" only borrows the voices. {mode, from, file, pod, name, output, duration}
     audio: null,
+    location: null,  // the id of one of S.locations; none = the story's place, or H3 designs it
   });
   const blank = () => ({
     title: "", logline: "", where: "", when: "", look: "film", lookText: "", aspect: "16:9",
     music: "", takes: 1, hd: false, fast: false,
-    place: null,  // {file, pod, thumb, what}
+    place: null,  // {file, pod, thumb, what}: the story's own place, for scenes without a location
+    // Location photos, each stored once however many scenes use it (a story's scenes would
+    // otherwise copy the same picture into localStorage dozens of times). {id, what, name, file, pod, thumb}
+    locations: [],
     cast: [],     // [{id, libId, name, who, voice, file, pod, thumb}]
     scenes: [newScene(1)], at: 0,
   });
@@ -104,7 +108,10 @@
     for (const sc of st.scenes) sc.frames = { start: sc.frames?.start || null, end: sc.frames?.end || null };
     for (const x of [st.place, ...st.cast, ...frameItems(st), ...st.scenes.flatMap((sc) => [sc.blocking, sc.audio])]) if (x) delete x.busy;
     if (st.place && !st.place.thumb) st.place = null;
+    st.locations = (st.locations || []).filter((l) => l.thumb);
+    for (const l of st.locations) delete l.busy;
     for (const sc of st.scenes) {
+      if (!st.locations.some((l) => l.id === sc.location)) sc.location = null;
       if (sc.blocking && !sc.blocking.file) sc.blocking = null;
       if (sc.audio && !sc.audio.from && !sc.audio.file) sc.audio = null;
       for (const k of FRAME_KEYS) if (sc.frames[k] && !sc.frames[k].thumb) sc.frames[k] = null;
@@ -237,15 +244,18 @@
   }
 
   // the pictures in the order H3 numbers them for a scene: its cast with a photo, then the place
+  const locOf = (sc) => S.locations.find((l) => l.id === sc?.location) || null;
+
   function refsFor(sc = scene()) {
     const files = [], picOf = new Map(), cast = sceneCast(sc);
     for (const i of cast) if (S.cast[i].thumb || S.cast[i].file) picOf.set(S.cast[i].id, files.push(S.cast[i]));
-    const placePic = S.place?.thumb || S.place?.file ? files.push(S.place) : 0;
-    return { files, picOf, placePic, cast };
+    const place = locOf(sc) || S.place;
+    const placePic = place?.thumb || place?.file ? files.push(place) : 0;
+    return { files, picOf, placePic, cast, place };
   }
 
   function buildPrompt(sc = scene()) {
-    const { picOf, placePic, cast } = refsFor(sc);
+    const { picOf, placePic, cast, place } = refsFor(sc);
     // story index -> this scene's <Subject N> and (SN) number
     const slot = new Map(cast.map((i, j) => [i, j + 1]));
     const blk = sc.blocking?.file ? sc.blocking : null;
@@ -295,8 +305,8 @@
         }
       }
       if (placePic) {
-        const what = trim(S.place.what) || where || "the location";
-        parts.push(`The scene takes place in ${what} shown in <Picture ${placePic}>. Use <Picture ${placePic}> as the exact reference for the setting, not for anyone's face.`);
+        const what = trim(place.what) || where || "the location";
+        parts.push(`The scene takes place in the location shown in <Picture ${placePic}>: ${what}. Use <Picture ${placePic}> as the exact reference for the setting, not for anyone's face.`);
       }
       if (blk) {
         const use = {
@@ -717,6 +727,52 @@
     msg(`Scene ${S.at + 1} is angle ${n} of scene ${sceneNo(root)}: change each shot's camera, keep the dialogue and the seconds. It takes scene ${sceneNo(root)}'s sound once that clip is made.`);
   }
 
+  function drawLocation() {
+    const sc = scene(), l = locOf(sc);
+    const pick = el("select", { title: "This scene's location photo" },
+      el("option", { value: "", text: S.place?.thumb ? "The story's place" : "None: H3 designs the place" }),
+      ...S.locations.map((x) => el("option", { value: x.id, text: (x.what || "").trim() || x.name || "location" })),
+      el("option", { value: "+new", text: "+ New location photo…" }));
+    pick.value = l ? l.id : "";
+    pick.addEventListener("change", () => {
+      if (pick.value === "+new") {
+        pick.value = l ? l.id : "";
+        return $("#stLocFile").click();
+      }
+      sc.location = pick.value || null;
+      drawLocation();
+      changed();
+    });
+    const users = l ? S.scenes.filter((x) => x.location === l.id).length : 0;
+    $("#stLocation").replaceChildren(el("div", { class: "st-loc" },
+      l ? el("span", { class: `sp-thumb st-loc-thumb${l.busy ? " busy" : ""}` }, l.thumb ? el("img", { src: l.thumb, alt: "" }) : null)
+        : el("span", { class: "sp-nophoto st-loc-thumb", text: "no photo" }),
+      el("div", { class: "st-loc-body" },
+        el("div", { class: "row tight st-audio-src" }, el("span", { class: "opt-k", text: "Location" }), pick),
+        l ? input(l.what || "", "what the place is, e.g. Mali's small open-plan condo", (v) => { l.what = v; changed(); }) : null,
+        el("p", { class: "small dim", text: l
+          ? `${users} scene${users === 1 ? " uses" : "s use"} this location; a change to it applies to all of them.`
+          : "A photo of the place keeps it the same in every scene and angle that uses it." }))));
+  }
+
+  async function addLocation(f) {
+    const sc = scene();
+    const loc = { id: uid(), what: trim(sc.where) || "", name: f.name, file: null, pod: null, thumb: null, busy: true };
+    S.locations.push(loc);
+    sc.location = loc.id;
+    drawLocation();
+    try {
+      Object.assign(loc, await pickPicture(f));
+      delete loc.busy;
+    } catch (e) {
+      S.locations = S.locations.filter((x) => x !== loc);
+      sc.location = null;
+      msg(`${f.name}: ${e.message}`);
+    }
+    drawLocation();
+    changed();
+  }
+
   function drawScene() {
     const sc = scene();
     $("#stSceneNo").textContent = String(S.at + 1);
@@ -728,6 +784,7 @@
     $("#stSceneSound").value = sc.sound;
     $("#stSceneSound").placeholder = trim(S.music) || "Ambient sound that matches the setting";
     $("#stDelScene").hidden = S.scenes.length < 2;
+    drawLocation();
     drawFrames();
     drawAudio();
     drawBlocking();
@@ -994,7 +1051,9 @@ s.render.filepath = "//blocking_scene${n}_"
     if (blk?.file && blk.pod && blk.pod !== pod() && !DEMO) throw new Error("its blocking video is on another pod: add it again");
     const audio = await audioFile(sc);
     const refs = [];
-    for (const item of refsFor(sc).files) refs.push(await onPod(item, item === S.place ? "place" : item.name || "character"));
+    for (const item of refsFor(sc).files) {
+      refs.push(await onPod(item, item === S.place || S.locations.includes(item) ? "location" : item.name || "character"));
+    }
     // first frame = 0, last frame = -1 (server.py counts a negative index back from the end)
     const keyframes = [];
     for (const [key, frame] of [["start", 0], ["end", -1]]) {
@@ -1019,7 +1078,7 @@ s.render.filepath = "//blocking_scene${n}_"
   function snapshot(i) {
     const strip = (x) => x && { ...x, thumb: undefined, busy: undefined };
     return {
-      ...S, at: i, place: strip(S.place), cast: S.cast.map(strip),
+      ...S, at: i, place: strip(S.place), cast: S.cast.map(strip), locations: S.locations.map(strip),
       scenes: S.scenes.map((sc) => ({
         ...sc, state: undefined, blocking: strip(sc.blocking), audio: strip(sc.audio),
         frames: { start: strip(sc.frames?.start), end: strip(sc.frames?.end) },
@@ -1119,7 +1178,7 @@ s.render.filepath = "//blocking_scene${n}_"
     // the recipe names files on the pod it was made on; they show here through refUrl
     const keep = (x) => x && { ...x, pod: here, thumb: x.file && !DEMO ? A.refUrl(x.file) : null };
     S = settle(Object.assign(blank(), st, {
-      place: keep(st.place), cast: (st.cast || []).map(keep),
+      place: keep(st.place), cast: (st.cast || []).map(keep), locations: (st.locations || []).map(keep),
       scenes: (st.scenes || []).map((sc) => ({
         ...sc, blocking: sc.blocking && { ...sc.blocking, pod: here },
         audio: sc.audio && { ...sc.audio, pod: here },
@@ -1129,7 +1188,7 @@ s.render.filepath = "//blocking_scene${n}_"
     if (!S.scenes.length) S.scenes = [newScene(1)];
     S.at = Math.min(st.at || 0, S.scenes.length - 1);
     // a refUrl thumbnail is a link to this pod; keep a copy of the picture so the story outlives it
-    for (const item of [S.place, ...S.cast, ...frameItems(S)].filter((x) => x?.thumb)) {
+    for (const item of [S.place, ...S.cast, ...S.locations, ...frameItems(S)].filter((x) => x?.thumb)) {
       shrink(item.thumb, 1024).then((t) => { item.thumb = t; save(); }).catch(() => {});
     }
     drawAll();
@@ -1262,6 +1321,11 @@ s.render.filepath = "//blocking_scene${n}_"
     };
     for (const [i, c] of story.cast.entries()) await photo(c, S.cast[i], safeName(c.name, `character-${i + 1}`));
     await photo(story.place, S.place || {}, "place");
+    for (const [i, l] of (story.locations || []).entries()) {
+      // named after the picture it came from (a description makes a long, unreadable file name)
+      const base = safeName((l.name || "").replace(/\.\w+$/, "") || l.what, String(i + 1)).slice(0, 48);
+      await photo(l, S.locations[i], base.startsWith("location") ? base : `location-${base}`);
+    }
     for (const [i, sc] of story.scenes.entries()) {
       delete sc.state;
       for (const key of FRAME_KEYS) await photo(sc.frames?.[key], S.scenes[i].frames?.[key] || {}, `scene-${i + 1}-${key}-frame`);
@@ -1347,13 +1411,14 @@ s.render.filepath = "//blocking_scene${n}_"
     // the media first, while the story is still the file's own objects
     const problems = [];
     const photos = new Map(), videos = new Map();
-    for (const x of [st.place, ...(st.cast || []), ...frameItems(st)]) if (x) photos.set(x, await pack.photo(x));
+    for (const x of [st.place, ...(st.cast || []), ...(st.locations || []), ...frameItems(st)]) if (x) photos.set(x, await pack.photo(x));
     const sounds = new Map();
     for (const sc of st.scenes) if (sc.blocking) videos.set(sc, await pack.video(sc));
     for (const sc of st.scenes) if (sc.audio && !sc.audio.from) sounds.set(sc, await pack.audio(sc));
 
     S = Object.assign(blank(), st, { at: 0 });
-    for (const x of [S.place, ...S.cast, ...frameItems(S)]) {
+    S.locations = S.locations || [];
+    for (const x of [S.place, ...S.cast, ...S.locations, ...frameItems(S)]) {
       if (!x) continue;
       const blob = photos.get(x);
       Object.assign(x, { file: null, pod: null, thumb: null });
@@ -1367,8 +1432,10 @@ s.render.filepath = "//blocking_scene${n}_"
       }
     }
     if (S.place && !S.place.thumb) S.place = null;
+    S.locations = S.locations.filter((l) => l.thumb);
     for (const sc of S.scenes) {
       delete sc.state;
+      if (!S.locations.some((l) => l.id === sc.location)) sc.location = null;
       sc.frames = { start: sc.frames?.start?.thumb ? sc.frames.start : null, end: sc.frames?.end?.thumb ? sc.frames.end : null };
       const blob = sc.blocking && videos.get(sc);
       if (blob) Object.assign(sc.blocking, { file: null, pod: null, busy: true, blob });
@@ -1423,7 +1490,7 @@ s.render.filepath = "//blocking_scene${n}_"
       }
     }
     msg("Uploading the pictures…");
-    for (const x of [S.place, ...S.cast, ...frameItems(S)]) {
+    for (const x of [S.place, ...S.cast, ...S.locations, ...frameItems(S)]) {
       if (!x?.blob) continue;
       const blob = x.blob;
       delete x.blob;
@@ -1537,11 +1604,17 @@ s.render.filepath = "//blocking_scene${n}_"
   $("#stAddScene").addEventListener("click", () => {
     const sc = newScene(S.scenes.length + 1);
     sc.sound = scene().sound;
+    sc.location = scene().location;  // a new scene usually goes on in the same place
     S.scenes.splice(S.at + 1, 0, sc);
     goScene(S.at + 1);
     $("#stSceneTitle").select();
   });
   $("#stAngle").addEventListener("click", addAngle);
+  $("#stLocFile").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (f) addLocation(f);
+  });
   $("#stAudioUpload").addEventListener("click", () => $("#stAudioFile").click());
   $("#stAudioFile").addEventListener("change", (e) => {
     const f = e.target.files[0];

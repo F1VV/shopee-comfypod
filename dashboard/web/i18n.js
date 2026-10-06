@@ -394,6 +394,13 @@
     // Story tab: per-scene cast
     "Not in the open scene: write @Name in a shot or give them a line": "ไม่อยู่ในฉากที่เปิดอยู่: พิมพ์ @ชื่อ ในช็อต หรือให้มีบทพูด",
 
+    // Story tab: locations
+    "Location": "สถานที่",
+    "The story's place": "สถานที่ของเรื่อง",
+    "None: H3 designs the place": "ไม่มี: ให้ H3 ออกแบบสถานที่เอง",
+    "+ New location photo…": "+ รูปสถานที่ใหม่…",
+    "A photo of the place keeps it the same in every scene and angle that uses it.": "รูปสถานที่ช่วยให้ทุกฉากและทุกมุมกล้องที่ใช้รูปนี้ เห็นสถานที่เดียวกัน",
+
     // Shopee affiliate tab (shopee.js, added for this workspace)
     "Shopee affiliate": "คลิป Shopee Affiliate",
     "Product photos and a few words in, a vertical clip out: a hook, the product working, and a call to the basket, spoken in Thai.":
@@ -612,6 +619,8 @@
     [/^Scene (\d+) is angle (\d+) of scene (\d+): change each shot's camera, keep the dialogue and the seconds\. It takes scene (\d+)'s sound once that clip is made\.$/, "ฉาก $1 คือมุมที่ $2 ของฉาก $3 เปลี่ยนกล้องของแต่ละช็อต แต่คงบทพูดและความยาวไว้ จะใช้เสียงของฉาก $4 เมื่อคลิปนั้นเสร็จ"],
     [/^(?:(\d+) queued\. )?Waiting: (.+)\. (\d+) scenes? will queue by (?:itself|themselves) when ready; keep this tab open\.$/, "กำลังรอ: $2 อีก $3 ฉากจะเข้าคิวเองเมื่อพร้อม อย่าปิดแท็บนี้"],
     [/^Uploading the sound of scene (\d+)…$/, "กำลังอัปโหลดเสียงของฉาก $1…"],
+    // Story tab: locations
+    [/^(\d+) scenes? uses? this location; a change to it applies to all of them\.$/, "มี $1 ฉากใช้สถานที่นี้ แก้ไขที่นี่จะมีผลกับทุกฉาก"],
   ];
 
   const PH = {  // placeholders
@@ -648,6 +657,8 @@
     "what they say, Thai or English": "บทพูด ภาษาไทยหรืออังกฤษ",
     // Story tab: per-scene cast
     "Outfit, only if not the photo's: e.g. modern clothes, a white T-shirt and jeans": "ชุด (ภาษาอังกฤษ) ใส่เฉพาะถ้าไม่ใช่ชุดในรูป เช่น modern clothes, a white T-shirt and jeans",
+    // Story tab: locations
+    "what the place is, e.g. Mali's small open-plan condo": "ที่นี่คืออะไร (ภาษาอังกฤษ) เช่น Mali's small open-plan condo",
   };
 
   const KEY = "aiangel.lang";

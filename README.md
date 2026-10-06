@@ -131,6 +131,15 @@ open. A character's **Outfit** field is for a photo in another costume (a charac
 dress for an episode set in 2026): when it is filled, H3 takes only the face and hair from the
 photo and dresses them as written.
 
+## Story tab: a location per scene
+
+Each scene picks its **Location** in the scene box: none (H3 designs the place), the story's
+place, or one of the story's location photos (**+ New location photo…** adds one). A location is
+stored once however many scenes use it, and its description is shared; a new scene and every
+angle start in the same location as the scene they come from. The picture goes to H3 as that
+clip's setting reference, so the room stays the same from clip to clip and behind every angle.
+Locations travel in the `.story.zip` (`photos/location-…`), each picture once.
+
 ## Story tab: start and end frames
 
 Each scene can be given the picture it **opens on** and the picture it **ends on**. They go to

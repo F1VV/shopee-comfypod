@@ -742,6 +742,14 @@ select { width: auto; padding: 7px 10px; font-family: var(--sans); }
 .st-scene-links { gap: 14px; margin: 0; }
 .st-scene .sp-fields { margin-top: 8px; }
 
+/* the scene's location photo */
+.st-location { margin: 14px 0 0; }
+.st-loc { display: flex; gap: 12px; align-items: flex-start; }
+.st-loc .st-loc-thumb { width: 76px; height: auto; aspect-ratio: 9 / 16; }
+.st-loc-body { flex: 1; min-width: 0; display: grid; gap: 6px; }
+.st-loc-body p { margin: 0; }
+.st-loc-body input { width: 100%; padding: 6px 10px; font-size: 13px; }
+
 /* start and end frames: shown at the clip's shape, cut the way the pod cuts them */
 .st-frames { margin: 16px 0 6px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; background: var(--s1); }
 .st-frames-head i { font-style: normal; }
