@@ -414,6 +414,14 @@
     "768p · H3 native, best": "768p · ขนาดจริงของ H3 ดีที่สุด",
     "8 · default": "8 · ค่าเริ่มต้น",
 
+    // Story tab: direction
+    "Direction for H3": "คำกำกับสำหรับ H3",
+    "optional, English: camera rules, light, continuity for this scene": "ไม่ใส่ก็ได้ ภาษาอังกฤษ: กติกากล้อง แสง ความต่อเนื่องของฉากนี้",
+
+    // Story tab: one take
+    "One continuous take": "เทคต่อเนื่องเทคเดียว",
+    "no cuts between the beats": "ไม่มีการตัดระหว่างช่วง",
+
     // Shopee affiliate tab (shopee.js, added for this workspace)
     "Shopee affiliate": "คลิป Shopee Affiliate",
     "Product photos and a few words in, a vertical clip out: a hook, the product working, and a call to the basket, spoken in Thai.":

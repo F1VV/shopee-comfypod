@@ -174,6 +174,15 @@ lines the same; the scene box warns when they drift apart.
 - The biggest single factor for faces is the character picture: one clear, high-resolution,
   single-person portrait per character works much better than a multi-panel character sheet.
 
+## Story tab: direction and one-take scenes
+
+- **Direction for H3** (per scene, English): camera rules, light and continuity for that clip,
+  added to its description. `@Names` work there as in the shots.
+- **One continuous take**: every beat of the scene keeps one shot number (`[Shot 1] 00:00-00:02 …
+  [Shot 1] 00:02-00:05 …`, the form H3's own examples use for one shot), and its size and camera
+  are stated once. Without it each beat is a new shot, which H3 reads as a cut. Use it for a
+  scene matched to one camera of a blocking render.
+
 ## Story tab: blocking videos from Blender
 
 1. Block the scene with simple shapes or mannequins, give each character its own colour, and

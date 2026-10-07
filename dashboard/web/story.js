@@ -71,6 +71,9 @@
   const newShot = (seconds = 3) => ({ id: uid(), seconds, size: "Medium shot", move: "static", what: "", lines: [] });
   const newScene = (n = 1) => ({
     id: uid(), title: `Scene ${n}`, where: "", when: "", sound: "",
+    notes: "",  // the scene's own direction for H3 (camera rules, light, continuity), in English
+    // one uninterrupted take: every beat keeps one shot number, since H3 reads a new number as a cut
+    oneTake: false,
     shots: [newShot(3), newShot(3)],
     blocking: null,  // {file, pod, name, duration, width, height, follow}
     // pictures the clip opens and ends exactly on; empty = H3 designs the shot from the text
@@ -235,7 +238,8 @@
   // order. Only they get a <Subject N> definition and send their photo, so a story with a big cast
   // does not put everyone into every clip (and a clip stays inside H3's 9 pictures).
   function sceneCast(sc) {
-    let text = sc.shots.map((s) => s.what).join("\n");
+    // the shots and the scene's own direction both name who is in it
+    let text = [...sc.shots.map((s) => s.what), sc.notes || ""].join("\n");
     const hit = new Set();
     // the longest names first, and each match taken out, so "@Mali Jr" never also counts as Mali
     const order = S.cast.map((c, i) => [castName(c, i), i]).sort((a, b) => b[0].length - a[0].length);
@@ -320,10 +324,10 @@
       if (blk) {
         const use = {
           camera: "Use <Video 1> only as the reference for the camera movement, the framing and the cuts, in time.",
-          full: "Use <Video 1> as the reference for the camera movement, the framing, the cuts, and where each character stands and moves, in time; its grey figures stand for the characters defined here.",
+          full: "Use <Video 1> as the reference for the camera movement, the framing, the cuts, and where each character stands and moves, in time; its mannequins stand for the characters defined here.",
           timing: "Use <Video 1> only loosely, for the rhythm and pacing of the cuts.",
         }[follow];
-        parts.push(`<Video 1> is an untextured grey 3D blocking animation (previz) of this scene. ${use} Do not copy its grey, untextured look: the real characters, the place and the light replace the blocking shapes.`);
+        parts.push(`<Video 1> is a simplified 3D blocking animation (previz) of this scene, with mannequin figures and flat materials. ${use} Do not copy its look: its mannequins, simplified faces, rigid joints and flat materials are only guides, and the real characters, the place and the light replace them.`);
       }
       if (aud) {
         // the guide's own audio wording: a voice-timbre reference, or the complete final track
@@ -372,8 +376,8 @@
       if (placePic) parts.push(`setting: fully_preserved - the location from <Picture ${placePic}> stays identical in every frame.`);
       if (blk) {
         parts.push({
-          camera: "<Video 1> (camera movement, framing and cuts): partially_preserved - follow its camera path in time; its grey untextured look is not kept.",
-          full: "<Video 1> (camera movement, blocking and timing): partially_preserved - follow its camera path and the characters' positions in time; its grey untextured look is not kept.",
+          camera: "<Video 1> (camera movement, framing and cuts): partially_preserved - follow its camera path in time; its mannequin look is not kept.",
+          full: "<Video 1> (camera movement, blocking and timing): partially_preserved - follow its camera path and the characters' positions in time; its mannequin look is not kept.",
           timing: "<Video 1> (cut and pacing structure): weak_reference",
         }[follow]);
       }
@@ -393,7 +397,10 @@
       at += Number(s.seconds) || 0;
       const stop = (length * at) / total;
       const move = s.move === "blocking" && !blk ? "static" : s.move;
-      let line = `[Shot ${i + 1}] ${timecode(start)}-${timecode(stop)}: ${s.size}, ${MOVES[move]?.[1] || "static camera"}.`;
+      // One take: the beats are timed parts of the same shot, as in H3's own examples ("[Shot 1]
+      // 00:00-00:03 ... [Shot 1] 00:03-00:05 ..."); its size and camera are said once, at the start.
+      const head = sc.oneTake && i > 0 ? "" : ` ${s.size}, ${MOVES[move]?.[1] || "static camera"}.`;
+      let line = `[Shot ${sc.oneTake ? 1 : i + 1}] ${timecode(start)}-${timecode(stop)}:${head}`;
       const what = mentions(s.what.trim());
       if (what) line += ` ${end(cap(what))}`;
       for (const ln of s.lines) {
@@ -409,7 +416,12 @@
       [look(), when && cap(when), `${shape()} ${S.aspect}`].filter(Boolean).join(", ") + ".",
       // titles and captions are added in editing; H3 is told so, since it will letter words it reads
       "No on-screen text, titles, captions or subtitles anywhere in the frame.",
+      // a character sheet is a grid of poses and labels: only the person may come out of it
+      picOf.size ? "The character pictures are identity references only: their multi-panel layouts, studio backgrounds, lettering and sample poses never appear in the video." : "",
+      trim(sc.notes) ? end(cap(mentions(trim(sc.notes)))) : "",
       ...shots, "");
+    // the two optional sentences above leave "" when unused; a blank line would end the section
+    for (let k = parts.length - 2; k >= 0 && parts[k] !== "detailed_description:"; k--) if (parts[k] === "") parts.splice(k, 1);
 
     const speaks = sc.shots.some((s) => s.lines.some((l) => l.text.trim()));
     const voices = speaks
@@ -793,6 +805,8 @@
     $("#stSceneWhen").value = sc.when;
     $("#stSceneWhen").placeholder = trim(S.when) || "e.g. the next morning";
     $("#stSceneSound").value = sc.sound;
+    if ($("#stSceneNotes")) $("#stSceneNotes").value = sc.notes || "";
+    if ($("#stOneTake")) $("#stOneTake").checked = sc.oneTake === true;
     $("#stSceneSound").placeholder = trim(S.music) || "Ambient sound that matches the setting";
     $("#stDelScene").hidden = S.scenes.length < 2;
     drawLocation();
@@ -1551,6 +1565,8 @@ s.render.filepath = "//blocking_scene${n}_"
   bindScene("#stSceneWhere", "where");
   bindScene("#stSceneWhen", "when");
   bindScene("#stSceneSound", "sound");
+  if ($("#stSceneNotes")) bindScene("#stSceneNotes", "notes");
+  $("#stOneTake")?.addEventListener("change", (e) => { scene().oneTake = e.target.checked; changed(); });
 
   $$("#stAspect button").forEach((b) => b.addEventListener("click", () => {
     S.aspect = b.dataset.aspect;

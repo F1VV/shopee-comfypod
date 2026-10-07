@@ -695,6 +695,9 @@
               <input id="stSceneSound" spellcheck="false"></label>
           </div>
 
+          <label class="field st-wide"><span>Direction for H3 <i>optional, English: camera rules, light, continuity for this scene</i></span>
+            <textarea id="stSceneNotes" rows="3" spellcheck="false"
+              placeholder="e.g. One uninterrupted camera move as in the blocking video. Warm sunset light from the rear window. The fork stays on the table."></textarea></label>
           <div class="st-location" id="stLocation"></div>
           <input id="stLocFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
 
@@ -763,6 +766,9 @@
           </div>
 
           <h3 class="st-shots-title">Shots <i>English for what happens; dialogue in Thai or English</i></h3>
+          <label class="toggle st-onetake" title="Every beat below is a timed part of the same uninterrupted shot. H3 reads a new shot number as a cut, so with this on it never cuts between beats.">
+            <input type="checkbox" id="stOneTake"> <span>One continuous take</span> <em>no cuts between the beats</em>
+          </label>
           <div id="stShots"></div>
           <div class="row tight">
             <button class="link" id="stAddShot" type="button">+ Add a shot</button>

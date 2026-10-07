@@ -705,6 +705,7 @@ select { width: auto; padding: 7px 10px; font-family: var(--sans); }
 #tab-story .mode-row { margin-bottom: 4px; }
 .st-wide { margin-top: 12px; }
 .st-wide input, .st-wide textarea { width: 100%; }
+#stSceneNotes { width: 100%; resize: vertical; font-family: var(--sans); line-height: 1.45; }
 #stLogline { resize: vertical; font-family: var(--sans); line-height: 1.5; }
 .st-chips { flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .st-chip { font: 400 12px var(--sans); color: var(--ink-2); background: var(--s2); border: 0; border-radius: 999px; box-shadow: var(--key); padding: 4px 10px; cursor: pointer; }
@@ -794,6 +795,7 @@ select { width: auto; padding: 7px 10px; font-family: var(--sans); }
 
 /* shots */
 .st-shots-title { margin-top: 18px; }
+.st-onetake { margin: 0 0 10px; }
 .st-shots-title i { font-style: normal; font-weight: 400; font-size: 12px; color: var(--ink-3); margin-left: 6px; }
 .st-shot-head { flex-wrap: wrap; }
 .st-shot-head select { max-width: 190px; }
